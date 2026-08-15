@@ -544,3 +544,65 @@ class TestDedupeDeskReporter:
 
         removed, skipped = remove_desk_reporter_overlaps(db_session)
         assert (removed, skipped) == (0, 1)
+
+
+class TestFixEmbeddedPhones:
+    """이름·직책 칸에 붙은 번호를 번호 칸으로 옮기는 정리 도구."""
+
+    @pytest.fixture()
+    def outlet(self, db_session):
+        return db_session.scalar(select(Outlet).where(Outlet.name == "서울신문"))
+
+    def _dirty_seat(self, db_session, outlet, name, role_label, phone=None):
+        from datetime import date as date_cls
+
+        from app.ingest.normalize import normalize_key
+
+        person = Person(name=name, name_key=normalize_key(name), phone=phone)
+        db_session.add(person)
+        db_session.flush()
+        seat = Assignment(
+            person_id=person.id, outlet_id=outlet.id, kind="reporter",
+            role_label=role_label, rank="기자", rank_order=50, valid_from=date_cls.today(),
+        )
+        db_session.add(seat)
+        db_session.flush()
+        return person, seat
+
+    def test_number_in_role_moves_to_empty_phone(self, db_session, outlet):
+        from tools.fix_embedded_phones import apply_fixes, find_dirty_rows
+
+        person, seat = self._dirty_seat(db_session, outlet, "김혜연", "편집국장 02-393-0188")
+        db_session.commit()
+
+        rows = find_dirty_rows(db_session)
+        assert [r["person"].name for r in rows] == ["김혜연"]
+        counts = apply_fixes(db_session, rows)
+        db_session.commit()
+
+        assert counts["moved"] == 1
+        assert person.phone == "023930188"
+        assert seat.role_label == "편집국장"
+
+    def test_number_kept_in_memo_when_phone_differs(self, db_session, outlet):
+        from tools.fix_embedded_phones import apply_fixes, find_dirty_rows
+
+        person, seat = self._dirty_seat(
+            db_session, outlet, "박부장", "부장 02-777-8888", phone="01012345678"
+        )
+        db_session.commit()
+
+        counts = apply_fixes(db_session, find_dirty_rows(db_session))
+        db_session.commit()
+
+        assert counts["noted"] == 1
+        assert person.phone == "01012345678"
+        assert "유선 02-777-8888" in person.memo
+        assert seat.role_label == "부장"
+
+    def test_clean_data_is_left_alone(self, db_session, outlet):
+        from tools.fix_embedded_phones import find_dirty_rows
+
+        self._dirty_seat(db_session, outlet, "정상인", "산업1부장", phone="01011112222")
+        db_session.commit()
+        assert find_dirty_rows(db_session) == []

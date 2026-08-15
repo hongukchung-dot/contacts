@@ -21,6 +21,12 @@ from dataclasses import dataclass, field
 # 앞자리 0이 누락된 표기(`10-4633-3750`)가 원본에 실제로 존재하므로 0을 선택적으로 둔다.
 PHONE_RE = re.compile(r"0?1[016-9][-.\s]?\d{3,4}[-.\s]?\d{4}")
 
+# 휴대폰 외의 전화번호 (서울 02, 지역 031~064, 070, 050X 안심번호, 15XX 대표번호).
+# 직책 칸에 `편집국장 02-393-0188` 처럼 붙어 들어오는 것을 떼어내는 데 쓴다.
+LANDLINE_RE = re.compile(
+    r"0(?:2|[3-6]\d|70|50\d)[-.\s]?\d{3,4}[-.\s]?\d{4}|1[5-9]\d{2}[-.\s]?\d{4}"
+)
+
 # 값이 비어 있음을 뜻하는 표기들
 EMPTY_MARKS = {"", "-", "--", "―", "–", "없음", "n/a", "na", "공석", "미정"}
 
@@ -141,6 +147,22 @@ def mask_phone_display(digits: str | None, *, mask_char: str = "●", empty: str
     return formatted
 
 
+def extract_embedded_phone(text: str | None) -> tuple[str | None, str | None]:
+    """이름·직책 문자열에 붙은 전화번호를 분리한다. (정리된 문자열, 번호 숫자열).
+
+    `편집국장 02-393-0188` → (`편집국장`, `023930188`). 번호가 없으면 그대로.
+    휴대폰이 섞인 경우(`김기자 010-1234-5678`)도 같은 방식으로 떼어낸다.
+    """
+    if not text:
+        return text, None
+    match = PHONE_RE.search(text) or LANDLINE_RE.search(text)
+    if not match:
+        return text, None
+    digits, _ = normalize_phone(match.group(0))
+    cleaned = clean_text(text.replace(match.group(0), " ")).strip(" ,/·-") or None
+    return cleaned, digits
+
+
 def normalize_name(raw: str) -> str:
     """`이 길 성` → `이길성`. 이름 안의 공백만 제거한다."""
     return re.sub(r"\s+", "", clean_text(raw))
@@ -243,6 +265,11 @@ def _build_person(blob: str, raw_phone: str | None, source_text: str) -> ParsedP
 
     warnings: list[str] = []
 
+    # 직책 뒤에 붙은 유선번호 (`편집국장 02-393-0188`) 는 떼어 둔다.
+    # (휴대폰은 이미 PHONE_RE 로 분리돼 blob 에 남아 있지 않다)
+    blob, embedded_phone = extract_embedded_phone(blob)
+    blob = blob or ""
+
     # 괄호 안 내용은 직책 또는 담당 분야다.
     parens = _PAREN_RE.findall(blob)
     stripped = _PAREN_RE.sub(" ", blob)
@@ -273,6 +300,14 @@ def _build_person(blob: str, raw_phone: str | None, source_text: str) -> ParsedP
     warnings.extend(phone_warnings)
     if raw_phone and not phone:
         warnings.append("번호를 해석하지 못해 비워 둠")
+
+    if embedded_phone:
+        if phone is None:
+            phone = embedded_phone
+            warnings.append("직책·이름에 붙어 있던 번호를 번호 칸으로 옮김")
+        elif embedded_phone != phone:
+            # 휴대폰이 이미 있으면 유선번호는 담당 메모로 보존한다.
+            notes.append(f"유선 {format_phone(embedded_phone)}")
 
     normalized_name = normalize_name(name)
     if len(normalized_name) > 20:

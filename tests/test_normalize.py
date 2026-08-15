@@ -185,3 +185,36 @@ class TestRoleDisplay:
         from app.ingest.normalize import role_display
 
         assert role_display(None, "편집국장", None) == "편집국장"
+
+
+class TestEmbeddedPhone:
+    """직책·이름에 붙은 전화번호 분리."""
+
+    def test_landline_in_role_moves_to_phone(self):
+        from app.ingest.normalize import parse_people
+
+        person = parse_people("김혜연 편집국장 02-393-0188")[0]
+        assert person.name == "김혜연"
+        assert person.role_label == "편집국장"
+        assert person.phone == "023930188"
+
+    def test_landline_kept_as_note_when_mobile_exists(self):
+        from app.ingest.normalize import parse_people
+
+        person = parse_people("박대표 발행인 02-777-8888 010-2222-3333")[0]
+        assert person.phone == "01022223333"
+        assert "유선 02-777-8888" in (person.note or "")
+        assert "02" not in (person.role_label or "")
+
+    def test_normal_role_with_digits_is_untouched(self):
+        from app.ingest.normalize import extract_embedded_phone
+
+        assert extract_embedded_phone("산업1부장") == ("산업1부장", None)
+        assert extract_embedded_phone("사회2부장") == ("사회2부장", None)
+
+    def test_extract_from_plain_role(self):
+        from app.ingest.normalize import extract_embedded_phone
+
+        cleaned, digits = extract_embedded_phone("편집국장 02-393-0188")
+        assert cleaned == "편집국장"
+        assert digits == "023930188"
