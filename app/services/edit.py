@@ -32,6 +32,8 @@ class EditError(Exception):
 class AssignmentForm:
     name: str
     phone: str | None
+    email: str | None
+    memo: str | None
     kind: str
     role_slot: str | None
     role_label: str | None
@@ -61,6 +63,10 @@ def parse_form(data) -> AssignmentForm:
             raise EditError(f"전화번호 형식이 올바르지 않습니다: {phone_raw}")
         del warnings
 
+    email = clean("email")
+    if email and ("@" not in email or " " in email or len(email) > 120):
+        raise EditError(f"이메일 형식이 올바르지 않습니다: {email}")
+
     kind = (data.get("kind") or "").strip()
     if kind not in {"desk", "reporter"}:
         raise EditError("구분은 데스크 또는 출입기자여야 합니다.")
@@ -68,6 +74,8 @@ def parse_form(data) -> AssignmentForm:
     return AssignmentForm(
         name=name,
         phone=phone,
+        email=email.lower() if email else None,
+        memo=clean("memo"),
         kind=kind,
         role_slot=clean("role_slot"),
         role_label=clean("role_label"),
@@ -107,6 +115,14 @@ def update_assignment(
     if form.phone != person.phone:
         changes.append(f"번호 {person.phone or '(없음)'} → {form.phone or '(없음)'}")
         _set_phone(session, person, form.phone)
+
+    if (form.email or None) != (person.email or None):
+        changes.append(f"이메일 {person.email or '(없음)'} → {form.email or '(없음)'}")
+        person.email = form.email
+
+    if (form.memo or None) != (person.memo or None):
+        changes.append("메모 수정")
+        person.memo = form.memo
 
     for field, label in (
         ("kind", "구분"),
@@ -149,21 +165,43 @@ def create_assignment(
     session: Session, outlet: Outlet, form: AssignmentForm, *, user: AppUser | None
 ) -> Assignment:
     """명단에 없는 사람을 직접 넣는다. 같은 번호·이름이 있으면 그 사람에 붙인다."""
-    person = None
-    if form.phone:
-        person = session.scalar(select(Person).where(Person.phone == form.phone))
+    name_key = normalize_key(form.name)
+    # 인물 매칭은 적재 규칙과 같은 기준을 쓴다: 같은 매체+이름, 또는 이름+번호가 모두 일치.
+    person = session.scalar(
+        select(Person)
+        .join(Assignment, Assignment.person_id == Person.id)
+        .where(
+            Person.name_key == name_key,
+            Assignment.outlet_id == outlet.id,
+            Assignment.valid_to.is_(None),
+        )
+        .limit(1)
+    )
+    if person is None and form.phone:
+        person = session.scalar(
+            select(Person).where(Person.phone == form.phone, Person.name_key == name_key)
+        )
     if person is None:
-        person = session.scalar(select(Person).where(Person.name_key == normalize_key(form.name)))
-    if person is None:
-        person = Person(name=form.name, name_key=normalize_key(form.name), phone=form.phone)
+        person = Person(
+            name=form.name,
+            name_key=normalize_key(form.name),
+            phone=form.phone,
+            email=form.email,
+            memo=form.memo,
+        )
         session.add(person)
         session.flush()
         if form.phone:
             session.add(
                 PersonPhone(person_id=person.id, phone=form.phone, valid_from=date.today())
             )
-    elif form.phone and person.phone != form.phone:
-        _set_phone(session, person, form.phone)
+    else:
+        if form.phone and person.phone != form.phone:
+            _set_phone(session, person, form.phone)
+        if form.email:
+            person.email = form.email
+        if form.memo:
+            person.memo = form.memo
 
     rank, rank_order = _rank_from_label(form.role_label)
     assignment = Assignment(

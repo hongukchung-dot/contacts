@@ -39,6 +39,9 @@ class Entry:
     since: date
     is_recent: bool
     locked: bool = False
+    kind: str = "reporter"
+    email: str | None = None
+    memo: str | None = None
 
     @property
     def role_text(self) -> str:
@@ -143,6 +146,9 @@ def _entry(assignment: Assignment, cutoff: date, seed_files: frozenset[int] = fr
         since=assignment.valid_from,
         is_recent=recent,
         locked=assignment.locked,
+        kind=assignment.kind,
+        email=assignment.person.email,
+        memo=assignment.person.memo,
     )
 
 
@@ -264,3 +270,45 @@ def stats(session: Session) -> dict:
             .limit(1)
         ),
     }
+
+
+def outlet_roster(session: Session, outlet_id: int) -> list[Entry]:
+    """직접 입력 화면용 — 한 매체의 현재 명단 전부 (데스크 + 출입기자)."""
+    cutoff = _recent_cutoff()
+    seed_files = _seed_file_ids(session)
+    slot_rank = {code: idx for idx, code in enumerate(get_reference().slot_codes)}
+
+    assignments = session.scalars(
+        select(Assignment)
+        .options(joinedload(Assignment.person))
+        .where(Assignment.outlet_id == outlet_id, Assignment.valid_to.is_(None))
+    ).unique().all()
+
+    assignments = sorted(
+        assignments,
+        key=lambda a: (
+            0 if a.kind == "desk" else 1,
+            slot_rank.get(a.role_slot or "", 99),
+            a.rank_order,
+            a.id,
+        ),
+    )
+    return [_entry(a, cutoff, seed_files) for a in assignments]
+
+
+def outlets_by_category(session: Session) -> list[tuple[str, list[Outlet]]]:
+    """매체 선택 드롭다운용 — 분류별로 묶은 매체 목록."""
+    outlets = session.scalars(
+        select(Outlet).where(Outlet.active.is_(True)).order_by(Outlet.sort_order, Outlet.name)
+    ).all()
+    grouped: dict[str, list[Outlet]] = {}
+    for outlet in outlets:
+        grouped.setdefault(outlet.category, []).append(outlet)
+
+    ordered: list[tuple[str, list[Outlet]]] = []
+    for name in CATEGORY_ORDER:
+        if name in grouped:
+            ordered.append((name, grouped.pop(name)))
+    for name in sorted(grouped):
+        ordered.append((name, grouped[name]))
+    return ordered

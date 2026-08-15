@@ -14,6 +14,7 @@ from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse,
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from markupsafe import Markup, escape
+from urllib.parse import quote
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -516,16 +517,23 @@ async def export_xlsx(
             sheet.append(line)
 
     sheet = workbook.create_sheet("출입기자")
-    sheet.append(["분류", "매체", "부서", "이름", "직책", "전화번호"])
+    sheet.append(["분류", "매체", "부서", "이름", "직책", "전화번호", "이메일", "메모"])
     for outlet in db.scalars(select(Outlet).order_by(Outlet.sort_order)).all():
         detail = directory.outlet_detail(db, outlet.id)
         if not detail:
             continue
         for dept, entries in detail["reporters_by_dept"].items():
             for entry in entries:
-                sheet.append(
-                    [outlet.category, outlet.name, dept, entry.name, entry.role_label or "", format_phone(entry.phone)]
-                )
+                sheet.append([
+                    outlet.category,
+                    outlet.name,
+                    dept,
+                    entry.name,
+                    entry.role_text or "",
+                    format_phone(entry.phone),
+                    entry.email or "",
+                    entry.memo or "",
+                ])
 
     buffer = io.BytesIO()
     workbook.save(buffer)
@@ -538,6 +546,63 @@ async def export_xlsx(
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f'attachment; filename="contacts_{stamp}.xlsx"'},
     )
+
+
+# ── 직접 입력 페이지 ────────────────────────────────────────────────────────
+
+def _entry_context(request: Request, db: Session, user: AppUser, outlet_id: int | None) -> dict:
+    outlet = db.get(Outlet, outlet_id) if outlet_id else None
+    return {
+        "user": user,
+        "outlet": outlet,
+        "outlets_by_category": directory.outlets_by_category(db),
+        "rows": directory.outlet_roster(db, outlet.id) if outlet else [],
+        "slots": get_reference().slot_codes,
+        "mask": get_settings().mask_phones_by_default,
+        "message": request.query_params.get("added"),
+        "error": None,
+    }
+
+
+@app.get("/entry", response_class=HTMLResponse)
+async def entry_page(
+    request: Request,
+    outlet: int | None = None,
+    user: AppUser = Depends(require_editor),
+    db: Session = Depends(get_db),
+) -> Response:
+    return templates.TemplateResponse(
+        request, "entry.html", _entry_context(request, db, user, outlet)
+    )
+
+
+@app.post("/entry", response_class=HTMLResponse)
+async def entry_add(
+    request: Request,
+    user: AppUser = Depends(require_editor),
+    db: Session = Depends(get_db),
+) -> Response:
+    form = await request.form()
+    outlet_id = int(form.get("outlet") or 0) or None
+    outlet = db.get(Outlet, outlet_id) if outlet_id else None
+    if outlet is None:
+        raise HTTPException(status_code=400, detail="매체를 고른 뒤 추가해 주세요.")
+
+    try:
+        assignment = create_assignment(db, outlet, parse_form(form), user=user)
+    except EditError as exc:
+        context = _entry_context(request, db, user, outlet_id)
+        context["error"] = str(exc)
+        return templates.TemplateResponse(request, "entry.html", context, status_code=400)
+
+    log_action(
+        db, user, "add_assignment",
+        f"{outlet.name} {assignment.person.name}",
+        request.client.host if request.client else None,
+    )
+    db.commit()
+    added = f"{outlet.name} {assignment.person.name} 을(를) 추가했습니다."
+    return RedirectResponse(f"/entry?outlet={outlet.id}&added={quote(added)}", status_code=303)
 
 
 # ── 직접 수정 / 삭제 / 합치기 ───────────────────────────────────────────────

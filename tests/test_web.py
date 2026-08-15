@@ -375,3 +375,143 @@ class TestEditPermissions:
         outlet = db_session.scalar(select(Outlet))
         modal = viewer.get(f"/outlet/{outlet.id}")
         assert "/edit" not in modal.text
+
+
+class TestEntryPage:
+    """직접 입력 페이지 — 매체를 고르고 여러 명을 이어서 넣는다."""
+
+    def _outlet_id(self, client) -> int:
+        from sqlalchemy import select
+
+        from app.models import Outlet
+
+        page = client.get("/entry")
+        assert page.status_code == 200
+        return int(re.search(r'<option value="(\d+)"', page.text).group(1))
+
+    def test_page_asks_for_an_outlet_first(self, auth):
+        page = auth.get("/entry")
+        assert "매체를 고르면" in page.text
+
+    def test_nav_link_is_shown_to_editors(self, auth):
+        assert "직접 입력" in auth.get("/").text
+
+    def test_viewer_cannot_open_it(self, client, db_session):
+        from app.models import AppUser
+        from app.services.auth import hash_password
+
+        db_session.add(
+            AppUser(
+                username="viewer3",
+                display_name="조회자",
+                password_hash=hash_password("verysecret123"),
+                role="viewer",
+            )
+        )
+        db_session.commit()
+        client.post(
+            "/login", data={"username": "viewer3", "password": "verysecret123", "next": "/"}
+        )
+        assert client.get("/entry").status_code == 403
+        assert "직접 입력" not in client.get("/").text
+
+    def test_add_person_with_email_and_memo(self, auth):
+        outlet_id = self._outlet_id(auth)
+        response = auth.post(
+            "/entry",
+            data={
+                "outlet": str(outlet_id),
+                "name": "새기자",
+                "phone": "010-1234-5678",
+                "email": "SaeGija@example.com",
+                "kind": "reporter",
+                "role_slot": "",
+                "role_label": "차장",
+                "dept": "산업부",
+                "note": "재계",
+                "memo": "행사 때 명함 교환",
+            },
+        )
+        assert response.status_code == 303
+        assert f"outlet={outlet_id}" in response.headers["location"], "같은 매체 화면에 머물러야 한다"
+
+        page = auth.get(f"/entry?outlet={outlet_id}")
+        assert "새기자" in page.text
+        assert "saegija@example.com" in page.text, "이메일은 소문자로 정규화된다"
+        assert "행사 때 명함 교환" in page.text
+
+    def test_added_person_shows_in_search(self, auth):
+        outlet_id = self._outlet_id(auth)
+        auth.post(
+            "/entry",
+            data={
+                "outlet": str(outlet_id),
+                "name": "검색될기자",
+                "phone": "010-7777-1111",
+                "email": "find@example.com",
+                "kind": "reporter",
+                "role_slot": "",
+                "role_label": "기자",
+            },
+        )
+        assert "검색될기자" in auth.get("/search", params={"q": "검색될기자"}).text
+        assert "검색될기자" in auth.get("/search", params={"q": "find@example.com"}).text
+
+    def test_bad_email_is_rejected_with_the_form_kept(self, auth):
+        outlet_id = self._outlet_id(auth)
+        response = auth.post(
+            "/entry",
+            data={
+                "outlet": str(outlet_id),
+                "name": "홍길동",
+                "email": "not-an-email",
+                "kind": "reporter",
+                "role_slot": "",
+            },
+        )
+        assert response.status_code == 400
+        assert "이메일 형식" in response.text
+
+    def test_outlet_is_required(self, auth):
+        response = auth.post("/entry", data={"name": "홍길동", "kind": "reporter"})
+        assert response.status_code == 400
+
+    def test_desk_entry_lands_in_the_matrix(self, auth):
+        outlet_id = self._outlet_id(auth)
+        auth.post(
+            "/entry",
+            data={
+                "outlet": str(outlet_id),
+                "name": "새논설실장",
+                "phone": "010-8888-2222",
+                "kind": "desk",
+                "role_slot": "논설실장",
+                "role_label": "논설실장",
+            },
+        )
+        body = auth.get("/").text.split("<tbody>", 1)[1]
+        assert "새논설실장" in body
+
+    def test_email_appears_in_export(self, auth):
+        outlet_id = self._outlet_id(auth)
+        auth.post(
+            "/entry",
+            data={
+                "outlet": str(outlet_id),
+                "name": "내보내기기자",
+                "phone": "010-3333-4444",
+                "email": "export@example.com",
+                "kind": "reporter",
+                "role_slot": "",
+            },
+        )
+        import io
+
+        from openpyxl import load_workbook
+
+        response = auth.get("/export.xlsx")
+        workbook = load_workbook(io.BytesIO(response.content))
+        sheet = workbook["출입기자"]
+        assert sheet.cell(row=1, column=7).value == "이메일"
+        values = {row[6] for row in sheet.iter_rows(min_row=2, values_only=True)}
+        assert "export@example.com" in values

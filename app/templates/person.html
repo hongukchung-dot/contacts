@@ -11,7 +11,11 @@
   <div class="body">
     <div class="statline" style="margin-bottom:12px;">
       <span>현재 번호 <b>{% if person.phone %}<span class="phone" data-phone="{{ format_phone(person.phone) }}">{{ mask_phone(person.phone) }}</span>{% else %}—{% endif %}</b></span>
+      {% if person.email %}<span>이메일 <b><a href="mailto:{{ person.email }}">{{ person.email }}</a></b></span>{% endif %}
     </div>
+    {% if person.memo %}
+      <div class="notice info" style="white-space:pre-wrap;">{{ person.memo }}</div>
+    {% endif %}
 
     <h4>현재 자리</h4>
     <div class="tablewrap"><table>

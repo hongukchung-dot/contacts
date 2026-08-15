@@ -22,6 +22,11 @@
                  value="{{ format_phone(person.phone) if person and person.phone else '' }}">
         </label>
         <label>
+          <span>이메일</span>
+          <input name="email" type="email" maxlength="120" placeholder="name@example.com"
+                 value="{{ person.email or '' if person else '' }}">
+        </label>
+        <label>
           <span>구분</span>
           <select name="kind">
             <option value="desk" {{ 'selected' if not is_new and assignment.kind == 'desk' }}>데스크</option>
@@ -58,6 +63,11 @@
           <input type="checkbox" name="concurrent" value="1"
                  {{ 'checked' if not is_new and assignment.concurrent }}>
           <span>겸직</span>
+        </label>
+        <label style="grid-column:1/-1;">
+          <span>메모 <small class="muted">(특이사항·성향·최근 접촉 등)</small></span>
+          <textarea name="memo" rows="2"
+                    style="padding:7px 9px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);font:inherit;font-size:13px;resize:vertical;">{{ person.memo or '' if person else '' }}</textarea>
         </label>
       </div>
 

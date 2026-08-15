@@ -66,6 +66,8 @@ TRIGRAM_STATEMENTS = [
     "CREATE INDEX IF NOT EXISTS ix_alias_trgm ON outlet_alias USING gin (alias gin_trgm_ops)",
     "CREATE INDEX IF NOT EXISTS ix_assignment_role_trgm "
     "ON assignment USING gin (role_label gin_trgm_ops)",
+    "CREATE INDEX IF NOT EXISTS ix_person_email_trgm "
+    "ON person USING gin (email gin_trgm_ops)",
 ]
 
 
@@ -78,6 +80,9 @@ MIGRATIONS = [
     "ALTER TABLE assignment ADD COLUMN IF NOT EXISTS edited_by_id integer "
     "REFERENCES app_user(id) ON DELETE SET NULL",
     "ALTER TABLE source_file ADD COLUMN IF NOT EXISTS sheet_stats jsonb",
+    "ALTER TABLE person ADD COLUMN IF NOT EXISTS email varchar(120)",
+    "ALTER TABLE person ADD COLUMN IF NOT EXISTS memo text",
+    "CREATE INDEX IF NOT EXISTS ix_person_email ON person (email)",
 ]
 
 

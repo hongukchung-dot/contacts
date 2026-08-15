@@ -39,6 +39,7 @@ class Hit:
     dept: str | None
     kind: str
     phone: str | None
+    email: str | None = None
     score: float = 0.0
 
     @property
@@ -208,6 +209,7 @@ def _hit(assignment: Assignment, score: float = 1.0) -> Hit:
         dept=assignment.dept,
         kind=assignment.kind,
         phone=assignment.person.phone,
+        email=assignment.person.email,
         score=score,
     )
 
@@ -230,6 +232,8 @@ _FUZZY_SQL = text(
        AND (CAST(:outlet_id AS integer) IS NULL OR a.outlet_id = CAST(:outlet_id AS integer))
        AND (
              p.name ILIKE :like
+          OR COALESCE(p.email, '') ILIKE :like
+          OR COALESCE(p.memo, '') ILIKE :like
           OR o.name ILIKE :like
           OR COALESCE(a.role_label, '') ILIKE :like
           OR COALESCE(a.dept, '') ILIKE :like

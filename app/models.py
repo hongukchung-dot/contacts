@@ -98,6 +98,9 @@ class Person(Base, TimestampMixin):
     name_key: Mapped[str] = mapped_column(String(40), index=True)
     # 현재 대표 번호. 이력은 person_phone 에 남는다.
     phone: Mapped[str | None] = mapped_column(String(20), index=True)
+    email: Mapped[str | None] = mapped_column(String(120), index=True)
+    # 특이사항·성향·최근 접촉 기록 등 자유 기록
+    memo: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     phones: Mapped[list["PersonPhone"]] = relationship(
         back_populates="person", cascade="all, delete-orphan"

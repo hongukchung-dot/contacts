@@ -23,7 +23,7 @@
             <td class="{{ 'person recent' if entry.is_recent }}"><a href="/person/{{ entry.person_id }}">{{ entry.name }}</a></td>
             <td>{{ entry.role_text or '-' }}{% if entry.concurrent %} <span class="tag">겸직</span>{% endif %}{% if entry.locked %} <span class="lockmark" title="손으로 고친 항목">✎</span>{% endif %}</td>
             <td>{{ entry.dept or '-' }}</td>
-            <td>{{ phone(entry, mask) }}</td>
+            <td>{{ phone(entry, mask) }}{% if entry.email %}<br><a class="muted" href="mailto:{{ entry.email }}">{{ entry.email }}</a>{% endif %}{% if entry.memo %}<br><span class="muted" title="{{ entry.memo }}">📝 {{ entry.memo[:30] }}{{ '…' if entry.memo|length > 30 }}</span>{% endif %}</td>
             {% if user.can_edit %}
               <td><button class="rowedit" data-modal="/assignment/{{ entry.assignment_id }}/edit">수정</button></td>
             {% endif %}
@@ -46,7 +46,7 @@
               <td class="{{ 'person recent' if entry.is_recent }}"><a href="/person/{{ entry.person_id }}">{{ entry.name }}</a></td>
               <td>{{ entry.role_text or entry.rank }}{% if entry.locked %} <span class="lockmark" title="손으로 고친 항목">✎</span>{% endif %}</td>
               <td>{{ entry.note or '-' }}</td>
-              <td>{{ phone(entry, mask) }}</td>
+              <td>{{ phone(entry, mask) }}{% if entry.email %}<br><a class="muted" href="mailto:{{ entry.email }}">{{ entry.email }}</a>{% endif %}{% if entry.memo %}<br><span class="muted" title="{{ entry.memo }}">📝 {{ entry.memo[:30] }}{{ '…' if entry.memo|length > 30 }}</span>{% endif %}</td>
               {% if user.can_edit %}
                 <td><button class="rowedit" data-modal="/assignment/{{ entry.assignment_id }}/edit">수정</button></td>
               {% endif %}

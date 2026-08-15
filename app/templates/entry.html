@@ -1,0 +1,145 @@
+{% extends "base.html" %}
+{% from "_phone.html" import phone %}
+{% block title %}직접 입력 · 언론사 주소록{% endblock %}
+{% block content %}
+
+{% if message %}<div class="notice ok">{{ message }}</div>{% endif %}
+{% if error %}<div class="notice error">{{ error }}</div>{% endif %}
+
+<div class="panel">
+  <h2>직접 입력</h2>
+  <div class="body">
+    <p class="muted" style="margin-top:0;">
+      파일에 없는 사람을 직접 넣거나 잘못된 항목을 고칩니다.
+      여기서 넣은 항목은 잠기므로, 다음에 올라온 파일이 조용히 덮어쓰지 않습니다.
+    </p>
+    <form method="get" action="/entry" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+      <label class="muted" for="outlet">매체</label>
+      <select id="outlet" name="outlet" onchange="this.form.submit()"
+              style="padding:7px 9px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);min-width:200px;">
+        <option value="">— 매체를 고르세요 —</option>
+        {% for category, items in outlets_by_category %}
+          <optgroup label="{{ category }}">
+            {% for item in items %}
+              <option value="{{ item.id }}" {{ 'selected' if outlet and outlet.id == item.id }}>{{ item.name }}</option>
+            {% endfor %}
+          </optgroup>
+        {% endfor %}
+      </select>
+      <noscript><button class="btn" type="submit">선택</button></noscript>
+    </form>
+  </div>
+</div>
+
+{% if not outlet %}
+  <div class="panel"><div class="body">
+    <div class="notice info">위에서 매체를 고르면 그 매체의 명단이 나오고, 아래에서 바로 추가할 수 있습니다.</div>
+  </div></div>
+{% else %}
+
+<div class="panel">
+  <h2>
+    {{ outlet.name }} 현재 명단
+    <span class="muted">{{ rows|length }}건</span>
+    <span class="spacer" style="flex:1"></span>
+    <button class="btn small" type="button" data-outlet="{{ outlet.id }}">팝업으로 보기</button>
+  </h2>
+  <div class="tablewrap">
+    <table>
+      <thead>
+        <tr>
+          <th style="width:70px;">구분</th>
+          <th style="width:90px;">이름</th>
+          <th style="width:130px;">직책</th>
+          <th style="width:80px;">부서</th>
+          <th style="width:135px;">연락처</th>
+          <th style="width:190px;">이메일</th>
+          <th>메모</th>
+          <th style="width:52px;"></th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for row in rows %}
+        <tr>
+          <td>{{ '데스크' if row.kind == 'desk' else '출입기자' }}</td>
+          <td><a href="/person/{{ row.person_id }}">{{ row.name }}</a></td>
+          <td>{{ row.role_text or '-' }}{% if row.locked %} <span class="lockmark" title="손으로 고친 항목">✎</span>{% endif %}</td>
+          <td>{{ row.dept or '-' }}</td>
+          <td>{{ phone(row, mask) }}</td>
+          <td class="muted">{{ row.email or '—' }}</td>
+          <td class="muted">{{ row.memo or '' }}</td>
+          <td><button class="rowedit" data-modal="/assignment/{{ row.assignment_id }}/edit">수정</button></td>
+        </tr>
+      {% else %}
+        <tr><td colspan="8" class="muted">아직 등록된 사람이 없습니다. 아래에서 추가하세요.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="panel">
+  <h2>{{ outlet.name }} — 새로 추가</h2>
+  <div class="body">
+    <form method="post" action="/entry">
+      <input type="hidden" name="outlet" value="{{ outlet.id }}">
+      <div class="formgrid">
+        <label>
+          <span>이름 <small class="muted">(필수)</small></span>
+          <input name="name" required maxlength="20" autofocus value="">
+        </label>
+        <label>
+          <span>전화번호</span>
+          <input name="phone" placeholder="010-1234-5678" value="">
+        </label>
+        <label>
+          <span>이메일</span>
+          <input name="email" type="email" placeholder="name@example.com" maxlength="120" value="">
+        </label>
+        <label>
+          <span>구분</span>
+          <select name="kind">
+            <option value="reporter" selected>출입기자</option>
+            <option value="desk">데스크</option>
+          </select>
+        </label>
+        <label>
+          <span>직책 열 <small class="muted">(간부 현황 표에 넣을 때만)</small></span>
+          <select name="role_slot">
+            <option value="">— 표에 넣지 않음 —</option>
+            {% for code in slots %}<option value="{{ code }}">{{ code }}</option>{% endfor %}
+          </select>
+        </label>
+        <label>
+          <span>직책 <small class="muted">(원문 그대로)</small></span>
+          <input name="role_label" maxlength="120" placeholder="차장, 산업1부장 …" value="">
+        </label>
+        <label>
+          <span>부서</span>
+          <input name="dept" maxlength="40" list="dept-options" value="">
+          <datalist id="dept-options">
+            <option value="산업부"><option value="테크부"><option value="IT과학부">
+            <option value="경제부"><option value="사회부">
+          </datalist>
+        </label>
+        <label>
+          <span>담당 <small class="muted">(재계, 전자 등)</small></span>
+          <input name="note" maxlength="120" value="">
+        </label>
+        <label style="grid-column:1/-1;">
+          <span>메모</span>
+          <textarea name="memo" rows="2"
+                    style="padding:7px 9px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);font:inherit;font-size:13px;resize:vertical;"></textarea>
+        </label>
+      </div>
+      <div class="formactions">
+        <button class="btn primary" type="submit">추가하고 계속 입력</button>
+        <span class="muted" style="align-self:center;">
+          저장하면 이 화면에 그대로 머무릅니다. 여러 명을 이어서 넣을 수 있습니다.
+        </span>
+      </div>
+    </form>
+  </div>
+</div>
+{% endif %}
+{% endblock %}

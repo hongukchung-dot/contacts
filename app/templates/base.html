@@ -15,6 +15,7 @@
   <nav class="links">
     <a href="/" class="{{ 'active' if request.url.path == '/' }}">간부 현황</a>
     <a href="/history" class="{{ 'active' if request.url.path == '/history' }}">변경 이력</a>
+    {% if user.can_edit %}<a href="/entry" class="{{ 'active' if request.url.path.startswith('/entry') }}">직접 입력</a>{% endif %}
     {% if user.can_edit %}<a href="/upload" class="{{ 'active' if request.url.path.startswith('/upload') or request.url.path.startswith('/review') }}">파일 업로드</a>{% endif %}
     {% if user.is_admin %}<a href="/admin/users" class="{{ 'active' if request.url.path.startswith('/admin') }}">계정 관리</a>{% endif %}
   </nav>
