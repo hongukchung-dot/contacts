@@ -341,3 +341,99 @@ class TestLockedSurvivesUpload:
         assert touching, "번호를 되돌리려는 변경이 잡혀야 한다"
         assert all(not c.auto_apply for c in touching), "손으로 고친 항목은 자동 반영되면 안 된다"
         assert all("손으로 고친" in (c.reason or "") for c in touching)
+
+
+class TestMergeOutlets:
+    """같은 매체가 두 표기로 갈라져 들어온 경우 (헤럴드 / 헤럴드경제 등)."""
+
+    @pytest.fixture()
+    def split(self, db_session):
+        """`헤럴드` 와 `헤럴드경제` 가 따로 등록된 상태를 만든다."""
+        from app.ingest.normalize import normalize_key
+
+        keep = db_session.scalar(select(Outlet).where(Outlet.name == "헤럴드경제"))
+        assert keep is not None
+        drop = Outlet(
+            name="헤럴드", name_key=normalize_key("헤럴드"), category="미분류", sort_order=9000
+        )
+        db_session.add(drop)
+        db_session.flush()
+
+        create_assignment(
+            db_session, keep,
+            parse_form(form(name="한석희", phone="010-4320-0792", role_slot="산업부장", role_label="산업부장")),
+            user=None,
+        )
+        create_assignment(
+            db_session, drop,
+            parse_form(form(name="서경원", phone="010-7404-0130", kind="reporter", role_slot="", role_label="차장")),
+            user=None,
+        )
+        # 양쪽에 같은 사람이 다른 인물로 들어간 경우
+        create_assignment(
+            db_session, drop,
+            parse_form(form(name="한석희", phone="010-4320-0792", kind="reporter", role_slot="", role_label="국장")),
+            user=None,
+        )
+        db_session.commit()
+        return keep, drop
+
+    def test_dictionary_now_maps_the_alias(self):
+        from app.ingest.reference import get_reference
+
+        reference = get_reference()
+        for alias, canonical in (
+            ("헤럴드", "헤럴드경제"),
+            ("인사이트", "인사이트코리아"),
+            ("시사저널e", "시사저널"),
+            ("포브스", "포브스코리아"),
+        ):
+            outlet = reference.match_outlet(alias)
+            assert outlet is not None and outlet.name == canonical, alias
+
+    def test_merge_moves_every_seat(self, db_session, split):
+        from app.services.edit import merge_outlets
+
+        keep, drop = split
+        drop_id = drop.id
+        result = merge_outlets(db_session, keep, drop)
+        db_session.commit()
+
+        assert db_session.get(Outlet, drop_id) is None
+        assert result["moved"] == 2
+        names = {a.person.name for a in current(db_session, keep)}
+        assert names == {"한석희", "서경원"}
+
+    def test_same_person_on_both_sides_is_merged(self, db_session, split):
+        from app.services.edit import merge_outlets
+
+        keep, drop = split
+        merge_outlets(db_session, keep, drop)
+        db_session.commit()
+
+        people = db_session.scalars(select(Person).where(Person.name == "한석희")).all()
+        assert len(people) == 1, "같은 매체에 같은 이름이 둘로 남으면 안 된다"
+
+    def test_dropped_name_becomes_an_alias(self, db_session, split):
+        from app.models import OutletAlias
+        from app.services.edit import merge_outlets
+
+        keep, drop = split
+        merge_outlets(db_session, keep, drop)
+        db_session.commit()
+
+        alias = db_session.scalar(select(OutletAlias).where(OutletAlias.alias_key == "헤럴드"))
+        assert alias is not None and alias.outlet_id == keep.id
+
+    def test_auto_pairs_are_found_from_the_dictionary(self, db_session, split):
+        from tools.merge_outlets import find_auto_pairs
+
+        assert ("헤럴드", "헤럴드경제") in find_auto_pairs()
+
+    def test_cannot_merge_an_outlet_with_itself(self, db_session, split):
+        from app.services.edit import EditError as _EditError
+        from app.services.edit import merge_outlets
+
+        keep, _ = split
+        with pytest.raises(_EditError):
+            merge_outlets(db_session, keep, keep)

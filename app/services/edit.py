@@ -21,7 +21,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..ingest.normalize import normalize_key, normalize_name, normalize_phone
-from ..models import Assignment, AppUser, Outlet, Person, PersonPhone
+from ..models import Assignment, AppUser, Outlet, OutletAlias, Person, PersonPhone
 
 
 class EditError(Exception):
@@ -327,3 +327,78 @@ def merge_persons(
     session.delete(drop)
     session.flush()
     return moved
+
+
+# ── 매체 합치기 ─────────────────────────────────────────────────────────────
+
+def merge_outlets(session: Session, keep: Outlet, drop: Outlet) -> dict:
+    """`drop` 매체를 `keep` 으로 합친다.
+
+    같은 매체가 두 표기로 갈라져 들어온 경우에 쓴다
+    (`헤럴드` / `헤럴드경제`, `시사저널` / `시사저널e` 처럼).
+
+    자리를 옮긴 뒤, 같은 매체 안에 같은 이름이 둘이 되면 인물도 합친다.
+    적재 규칙과 같은 기준이다 — 같은 매체에 같은 이름이면 같은 사람.
+    """
+    if keep.id == drop.id:
+        raise EditError("같은 매체끼리는 합칠 수 없습니다.")
+
+    moved = session.query(Assignment).filter(Assignment.outlet_id == drop.id).count()
+    session.query(Assignment).filter(Assignment.outlet_id == drop.id).update(
+        {Assignment.outlet_id: keep.id}, synchronize_session=False
+    )
+
+    # 별칭도 함께 옮겨 다음 업로드부터 바로 잡히게 한다.
+    for alias in list(session.scalars(
+        select(OutletAlias).where(OutletAlias.outlet_id == drop.id)
+    ).all()):
+        exists = session.scalar(
+            select(OutletAlias).where(
+                OutletAlias.alias_key == alias.alias_key, OutletAlias.outlet_id != drop.id
+            )
+        )
+        if exists:
+            session.delete(alias)
+        else:
+            alias.outlet_id = keep.id
+
+    drop_key = normalize_key(drop.name)
+    if drop_key and not session.scalar(
+        select(OutletAlias).where(OutletAlias.alias_key == drop_key)
+    ):
+        session.add(OutletAlias(outlet_id=keep.id, alias=drop.name, alias_key=drop_key))
+
+    session.flush()
+    session.delete(drop)
+    session.flush()
+
+    merged_people = dedupe_people_in_outlet(session, keep)
+    return {"moved": moved, "merged_people": merged_people}
+
+
+def dedupe_people_in_outlet(session: Session, outlet: Outlet) -> int:
+    """한 매체 안에 같은 이름이 여러 인물로 갈라져 있으면 합친다."""
+    rows = session.execute(
+        select(Person.name_key, Person.id)
+        .join(Assignment, Assignment.person_id == Person.id)
+        .where(Assignment.outlet_id == outlet.id, Assignment.valid_to.is_(None))
+        .distinct()
+    ).all()
+
+    by_name: dict[str, list[int]] = {}
+    for name_key, person_id in rows:
+        by_name.setdefault(name_key, []).append(person_id)
+
+    merged = 0
+    for person_ids in by_name.values():
+        if len(person_ids) < 2:
+            continue
+        people = [session.get(Person, pid) for pid in person_ids]
+        people = [p for p in people if p is not None]
+        # 번호가 있는 쪽을 남긴다. 둘 다 있으면 먼저 등록된 쪽.
+        people.sort(key=lambda p: (p.phone is None, p.id))
+        keep_person, *others = people
+        for other in others:
+            merge_persons(session, keep_person, other, user=None)
+            merged += 1
+    return merged

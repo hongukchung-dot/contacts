@@ -91,7 +91,7 @@ outlets:
   - name: 헤럴드경제
     category: 경제지
     order: 207
-    aliases: [헤럴드 경제, 헤경]
+    aliases: [헤럴드 경제, 헤경, 헤럴드]
   - name: 아시아경제
     category: 경제지
     order: 208
@@ -143,6 +143,18 @@ outlets:
     category: 경제지
     order: 227
     aliases: []
+  - name: 인사이트코리아
+    category: 경제지
+    order: 228
+    aliases: [인사이트, 인사이트 코리아]
+  - name: 포브스코리아
+    category: 경제지
+    order: 229
+    aliases: [포브스, 포브스 코리아, forbes]
+  - name: 시사저널
+    category: 전문지
+    order: 230
+    aliases: [시사저널e, 시사저널이코노미]
 
   # ── 전문지 / 영자지 ────────────────────────────────────
   - name: 전자신문

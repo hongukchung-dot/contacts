@@ -237,6 +237,26 @@ docker compose exec app python tools/inspect_file.py /path/to/파일.xlsx --full
 > 정말 같은 매체라면 `outlets.yml` 의 해당 매체 `aliases` 에 표기를 넣고
 > `tools/init_db.py` 를 다시 돌리면 됩니다.
 
+### 같은 매체가 두 개로 갈라져 있다면
+
+파일마다 표기가 달라(`헤럴드` / `헤럴드경제`) 이미 두 매체로 등록된 경우,
+사전에 별칭을 넣은 뒤 아래로 합칩니다. **다시 적재할 필요 없습니다.**
+
+```bash
+docker compose exec app python tools/merge_outlets.py --auto         # 무엇을 합칠지 확인
+docker compose exec app python tools/merge_outlets.py --auto --yes   # 실제로 합치기
+```
+
+`--auto` 는 사전을 기준으로 합칠 대상을 알아서 찾습니다.
+사전과 무관하게 직접 지정할 수도 있습니다.
+
+```bash
+docker compose exec app python tools/merge_outlets.py --from 헤럴드 --into 헤럴드경제 --yes
+```
+
+자리와 번호 이력이 남는 쪽으로 모이고, 같은 매체에 같은 이름이 둘이 되면 인물도 합쳐집니다.
+없어진 이름은 별칭으로 남아 다음 업로드부터 바로 잡힙니다.
+
 ---
 
 ## 4. 화면에서 직접 넣고 고치기
