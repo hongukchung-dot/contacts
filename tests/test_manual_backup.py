@@ -157,3 +157,27 @@ class TestRoundTrip:
         state = collect_manual_state(db_session)
         path = save_backup(state, tmp_path)
         assert load_backup(path) == state
+
+    def test_deleted_seat_stays_deleted_after_rebuild(self, db_session, seoul):
+        from app.services.edit import purge_assignment
+
+        seat = make_auto_seat(db_session, seoul, "오입력", "010-1000-0006")
+        purge_assignment(db_session, seat)
+        db_session.commit()
+
+        state = collect_manual_state(db_session)
+        assert [s["name"] for s in state["deleted_seats"]] == ["오입력"]
+
+        db_session.query(Assignment).delete()
+        db_session.query(Person).delete()
+        db_session.commit()
+        make_auto_seat(db_session, seoul, "오입력", "010-1000-0006")
+        db_session.commit()
+
+        report = reapply_manual_state(db_session, state)
+        db_session.commit()
+        assert report["redeleted"] == ["서울신문 오입력"]
+        active = db_session.scalar(
+            select(Assignment).join(Person).where(Person.name == "오입력", Assignment.valid_to.is_(None))
+        )
+        assert active is None

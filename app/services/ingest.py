@@ -241,16 +241,23 @@ def _build_changes(
                     payload=payload,
                 )
                 continue
+            blocked = current["hand_blocked"].get(
+                (outlet.id, normalize_key(record.name), record.kind)
+            )
             _add(
                 change_set,
-                change_type=NEW,
+                change_type=CONFLICT if blocked else NEW,
                 outlet_name=outlet.name,
                 person_name=record.name,
                 field="assignment",
                 old_value=None,
                 new_value=_describe(record),
-                reason="현재 명단에 없는 인물",
-                auto_apply=not stale,
+                reason=(
+                    f"예전에 화면에서 {blocked}한 자리입니다 — 파일에 다시 나타났으니 확인이 필요합니다"
+                    if blocked
+                    else "현재 명단에 없는 인물"
+                ),
+                auto_apply=(not stale) and (blocked is None),
                 outlet_id=outlet.id,
                 payload=payload,
             )
@@ -304,22 +311,33 @@ def _build_changes(
         assignment = _find_assignment(current, person_id, outlet.id, record)
         if assignment is None:
             moved = current["assignments_by_person"].get(person_id) or []
+            # 데스크로 이미 있는 사람이 출입기자 명단에도 나오는 경우 —
+            # 데스크만 남긴다는 규칙에 따라 출입기자 자리는 만들지 않는다.
+            if record.kind == "reporter" and any(
+                a.outlet_id == outlet.id and a.kind == "desk" for a in moved
+            ):
+                continue
+            blocked = current["hand_blocked"].get(
+                (outlet.id, person.name_key, record.kind)
+            )
             other = [a for a in moved if a.kind == record.kind and a.outlet_id != outlet.id]
             reason = (
                 f"{other[0].outlet.name} → {outlet.name} 이동"
                 if other
                 else "새 직책/부서"
             )
+            if blocked:
+                reason = f"예전에 화면에서 {blocked}한 자리입니다 — 파일에 다시 나타났으니 확인이 필요합니다"
             _add(
                 change_set,
-                change_type=NEW if not other else UPDATE,
+                change_type=CONFLICT if blocked else (NEW if not other else UPDATE),
                 outlet_name=outlet.name,
                 person_name=record.name,
                 field="assignment",
                 old_value=_describe_assignment(other[0]) if other else None,
                 new_value=_describe(record),
-                reason=reason + lock_note,
-                auto_apply=(not stale) and (not locked),
+                reason=reason + ("" if blocked else lock_note),
+                auto_apply=(not stale) and (not locked) and (blocked is None),
                 person_id=person_id,
                 outlet_id=outlet.id,
                 payload=payload,
@@ -417,6 +435,18 @@ def _load_current(session: Session) -> dict:
         select(Assignment).where(Assignment.valid_to.is_(None))
     ).all()
 
+    # 손으로 마감/삭제한 자리 (잠긴 채 종료된 자리 = 화면에서 한 조치).
+    # 파일에 같은 사람이 다시 나타나면 조용히 되살리지 않고 확인을 요구한다.
+    hand_blocked: dict[tuple[int, str, str], str] = {}
+    for closed in session.scalars(
+        select(Assignment).where(Assignment.locked.is_(True), Assignment.valid_to.is_not(None))
+    ).all():
+        person = session.get(Person, closed.person_id)
+        if person is None:
+            continue
+        label = "오류로 삭제" if closed.deleted_at else "마감"
+        hand_blocked[(closed.outlet_id, person.name_key, closed.kind)] = label
+
     by_phone: dict[str, int] = {}
     by_phone_name: dict[tuple[str, str], int] = {}
     by_name: dict[str, list[int]] = {}
@@ -447,6 +477,7 @@ def _load_current(session: Session) -> dict:
         "by_phone_name": by_phone_name,
         "by_name": by_name,
         "by_outlet_name": by_outlet_name,
+        "hand_blocked": hand_blocked,
     }
 
 

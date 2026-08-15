@@ -539,3 +539,143 @@ class TestRebuild:
 
         assert db_session.scalar(select(AppUser).where(AppUser.username == "keepme")) is not None
         assert db_session.scalar(select(func.count()).select_from(Outlet)) > 0
+
+
+class TestHandEditsSurviveUploads:
+    """손으로 마감/삭제한 자리는 다음 업로드가 조용히 되살리지 못한다."""
+
+    def _put(self, session, outlet_name, name, phone, tmp_path, label, as_of, role="기자"):
+        from openpyxl import Workbook
+
+        path = tmp_path / f"{label}.xlsx"
+        workbook = Workbook()
+        workbook.properties.title = label  # 같은 명단이라도 파일 내용(sha256)이 달라지게
+        sheet = workbook.active
+        sheet.title = "종합지"
+        sheet.append(["매체", "이름", "직급", "전화번호"])
+        sheet.append([outlet_name, name, role, phone])
+        workbook.save(path)
+        change_set = stage_file(session, path, filename=f"{label}.xlsx", as_of_override=as_of)
+        session.flush()
+        return change_set
+
+    def test_hand_closed_seat_needs_review_when_file_readds_it(self, db_session, tmp_path):
+        from app.services.edit import close_assignment
+
+        apply(db_session, self._put(
+            db_session, "조선일보", "김민수", "010-1111-0001", tmp_path, "a", date(2026, 6, 1)
+        ))
+        seat = current_assignments(db_session, "조선일보")[0]
+        close_assignment(seat, user=None)
+        db_session.commit()
+
+        change_set = self._put(
+            db_session, "조선일보", "김민수", "010-1111-0001", tmp_path, "b", date(2026, 7, 1)
+        )
+        change = next(c for c in change_set.changes if c.person_name == "김민수")
+        assert change.change_type == CONFLICT
+        assert change.auto_apply is False
+        assert "마감" in change.reason
+
+    def test_hand_deleted_seat_needs_review_when_file_readds_it(self, db_session, tmp_path):
+        from app.services.edit import purge_assignment
+
+        apply(db_session, self._put(
+            db_session, "조선일보", "김민수", "010-1111-0001", tmp_path, "a", date(2026, 6, 1)
+        ))
+        purge_assignment(db_session, current_assignments(db_session, "조선일보")[0])
+        db_session.commit()
+
+        change_set = self._put(
+            db_session, "조선일보", "김민수", "010-1111-0001", tmp_path, "b", date(2026, 7, 1)
+        )
+        change = next(c for c in change_set.changes if c.person_name == "김민수")
+        assert change.change_type == CONFLICT
+        assert change.auto_apply is False
+        assert "삭제" in change.reason
+
+    def test_approving_the_conflict_revives_the_seat(self, db_session, tmp_path):
+        from app.services.edit import close_assignment
+
+        apply(db_session, self._put(
+            db_session, "조선일보", "김민수", "010-1111-0001", tmp_path, "a", date(2026, 6, 1)
+        ))
+        close_assignment(current_assignments(db_session, "조선일보")[0], user=None)
+        db_session.commit()
+
+        change_set = self._put(
+            db_session, "조선일보", "김민수", "010-1111-0001", tmp_path, "b", date(2026, 7, 1)
+        )
+        for change in change_set.changes:
+            change.decision = APPROVED
+        apply(db_session, change_set)
+        names = [a.person.name for a in current_assignments(db_session, "조선일보")]
+        assert "김민수" in names
+
+    def test_file_driven_closure_is_not_blocked(self, db_session, tmp_path):
+        """파일 반영으로 마감된 자리(잠기지 않음)는 다음 파일이 자유롭게 되살린다."""
+        apply(db_session, self._put(
+            db_session, "조선일보", "김민수", "010-1111-0001", tmp_path, "a", date(2026, 6, 1)
+        ))
+        seat = current_assignments(db_session, "조선일보")[0]
+        seat.valid_to = date(2026, 6, 15)  # 파일 반영에 의한 마감 — locked 아님
+        db_session.commit()
+
+        change_set = self._put(
+            db_session, "조선일보", "김민수", "010-1111-0001", tmp_path, "b", date(2026, 7, 1)
+        )
+        change = next(c for c in change_set.changes if c.person_name == "김민수")
+        assert change.change_type == NEW
+        assert change.auto_apply is True
+
+    def test_unrelated_new_person_still_auto_applies(self, db_session, tmp_path):
+        from app.services.edit import close_assignment
+
+        apply(db_session, self._put(
+            db_session, "조선일보", "김민수", "010-1111-0001", tmp_path, "a", date(2026, 6, 1)
+        ))
+        close_assignment(current_assignments(db_session, "조선일보")[0], user=None)
+        db_session.commit()
+
+        change_set = self._put(
+            db_session, "조선일보", "박영수", "010-2222-0002", tmp_path, "b", date(2026, 7, 1)
+        )
+        change = next(c for c in change_set.changes if c.person_name == "박영수")
+        assert change.change_type == NEW
+        assert change.auto_apply is True
+
+
+class TestDeskHolderNotDuplicatedAsReporter:
+    """데스크로 있는 사람이 출입기자 명단에 또 나와도 출입기자 자리를 만들지 않는다."""
+
+    def test_reporter_record_for_desk_holder_is_skipped(self, db_session, tmp_path):
+        from openpyxl import Workbook
+
+        # 부장(데스크)으로 먼저 적재
+        path = tmp_path / "desk.xlsx"
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet.title = "종합지"
+        sheet.append(["매체", "이름", "직급", "전화번호"])
+        sheet.append(["조선일보", "이길성", "산업부장", "010-1111-0001"])
+        workbook.save(path)
+        change_set = stage_file(db_session, path, filename="desk.xlsx", as_of_override=date(2026, 6, 1))
+        db_session.flush()
+        apply(db_session, change_set)
+
+        # 같은 사람이 직급 없이 출입기자 명단에 다시 등장
+        path2 = tmp_path / "rep.xlsx"
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet.title = "종합지"
+        sheet.append(["매체", "이름", "직급", "전화번호"])
+        sheet.append(["조선일보", "이길성", "", "010-1111-0001"])
+        workbook.save(path2)
+        change_set = stage_file(db_session, path2, filename="rep.xlsx", as_of_override=date(2026, 7, 1))
+        db_session.flush()
+
+        seat_changes = [c for c in change_set.changes if c.field == "assignment"]
+        assert seat_changes == [], [c.reason for c in seat_changes]
+        apply(db_session, change_set)
+        kinds = [a.kind for a in current_assignments(db_session, "조선일보")]
+        assert kinds == ["desk"]

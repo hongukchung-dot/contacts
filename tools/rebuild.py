@@ -211,7 +211,11 @@ def main() -> int:
     with session_scope() as session:
         manual_state = collect_manual_state(session)
     backup_path = save_backup(manual_state, get_settings().upload_dir / "manual-backups")
-    manual_total = len(manual_state["active_seats"]) + len(manual_state["closed_seats"])
+    manual_total = (
+        len(manual_state["active_seats"])
+        + len(manual_state["closed_seats"])
+        + len(manual_state["deleted_seats"])
+    )
     print(f"\n· 손으로 고친 {manual_total}건 + 이메일·메모 {len(manual_state['person_extras'])}건 백업")
     print(f"  → {backup_path}")
 
@@ -232,6 +236,9 @@ def main() -> int:
         if manual_report["reclosed"]:
             print(f"  도로 마감한 자리 {len(manual_report['reclosed'])}건: "
                   + ", ".join(manual_report["reclosed"][:10]))
+        if manual_report["redeleted"]:
+            print(f"  도로 삭제 처리한 자리 {len(manual_report['redeleted'])}건: "
+                  + ", ".join(manual_report["redeleted"][:10]))
         if manual_report["extras"]:
             print(f"  이메일·메모 복원 {len(manual_report['extras'])}명")
         for line in manual_report["missing_outlet"]:

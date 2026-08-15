@@ -91,8 +91,8 @@
         <form method="post" action="/assignment/{{ assignment.id }}/delete" data-edit-form>
           <input type="hidden" name="mode" value="purge">
           <button class="btn danger" type="submit"
-                  onclick="return confirm('잘못 들어온 항목으로 보고 완전히 지울까요?\n되돌릴 수 없습니다.')">
-            잘못된 항목 삭제 <small>(완전 삭제)</small>
+                  onclick="return confirm('잘못 들어온 항목으로 표시하고 화면에서 뺄까요?\n같은 데이터가 파일로 다시 들어오면 자동 반영 대신 확인을 요청합니다.')">
+            잘못된 항목 삭제 <small>(오류 표시)</small>
           </button>
         </form>
       </div>

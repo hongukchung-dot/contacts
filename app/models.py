@@ -160,6 +160,10 @@ class Assignment(Base, TimestampMixin):
     edited_by_id: Mapped[int | None] = mapped_column(
         ForeignKey("app_user.id", ondelete="SET NULL"), nullable=True
     )
+    # '오류 삭제' 표시. 애초에 잘못 들어온 자리 — 마감(정당한 이력)과 달리
+    # 이력 화면에서도 오류로 구분된다. 기록을 지우지 않아야 다음 업로드가
+    # 같은 데이터를 조용히 되살리는 것을 막을 수 있다.
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     person: Mapped[Person] = relationship(back_populates="assignments")
     outlet: Mapped[Outlet] = relationship(back_populates="assignments")

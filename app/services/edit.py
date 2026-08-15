@@ -233,21 +233,16 @@ def close_assignment(assignment: Assignment, *, user: AppUser | None) -> None:
 
 
 def purge_assignment(session: Session, assignment: Assignment) -> None:
-    """애초에 잘못 들어온 자리. 흔적 없이 지운다.
+    """애초에 잘못 들어온 자리. 화면에서 빼되 '오류 삭제' 기록은 남긴다.
 
-    그 사람에게 남은 자리가 하나도 없으면 인물 자체도 함께 정리한다.
+    기록을 지우면 다음 업로드·재구축이 같은 데이터를 조용히 되살린다.
+    실제 인사이동(퇴사·이동)은 close_assignment(마감)를 쓴다 — 그쪽은 정당한 이력이다.
     """
-    person_id = assignment.person_id
-    session.delete(assignment)
+    if assignment.valid_to is None:
+        assignment.valid_to = date.today()
+    assignment.deleted_at = datetime.now(timezone.utc)
+    _stamp(assignment, None)
     session.flush()
-
-    remaining = session.scalar(
-        select(Assignment.id).where(Assignment.person_id == person_id).limit(1)
-    )
-    if remaining is None:
-        person = session.get(Person, person_id)
-        if person is not None:
-            session.delete(person)
 
 
 # ── 인물 합치기 ─────────────────────────────────────────────────────────────

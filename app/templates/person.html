@@ -82,7 +82,13 @@
           <td>{{ '데스크' if a.kind == 'desk' else '출입기자' }}</td>
           <td>{{ a.role_label or a.role_slot or '-' }}</td>
           <td>{{ a.dept or '-' }}</td>
-          <td>{{ a.valid_from }} ~ {{ a.valid_to }}</td>
+          <td>
+            {% if a.deleted_at %}
+              <span class="tag" style="color:var(--danger);">오류로 삭제됨</span>
+            {% else %}
+              {{ a.valid_from }} ~ {{ a.valid_to }}
+            {% endif %}
+          </td>
         </tr>
       {% endfor %}
       </tbody>

@@ -57,7 +57,8 @@ def collect_manual_state(session: Session) -> dict:
     ).unique().all()
 
     active = [_seat_dict(a) for a in locked if a.valid_to is None]
-    closed = [_seat_dict(a) for a in locked if a.valid_to is not None]
+    closed = [_seat_dict(a) for a in locked if a.valid_to is not None and a.deleted_at is None]
+    deleted = [_seat_dict(a) for a in locked if a.deleted_at is not None]
 
     extras = [
         {"name": p.name, "phone": p.phone, "email": p.email, "memo": p.memo}
@@ -71,6 +72,7 @@ def collect_manual_state(session: Session) -> dict:
         "created_at": datetime.now(timezone.utc).isoformat(),
         "active_seats": active,
         "closed_seats": closed,
+        "deleted_seats": deleted,
         "person_extras": extras,
     }
 
@@ -106,11 +108,12 @@ def _find_active_seat(session: Session, item: dict, outlet: Outlet) -> Assignmen
 
 def reapply_manual_state(session: Session, state: dict) -> dict:
     """재적재가 끝난 DB 위에 손으로 고친 내용을 다시 얹는다."""
-    from .edit import AssignmentForm, _set_phone, _stamp, create_assignment
+    from .edit import AssignmentForm, _set_phone, _stamp, create_assignment, purge_assignment
 
     report: dict[str, list[str]] = {
         "restored": [],       # 다시 만든/잠근 활성 자리
         "reclosed": [],       # 도로 마감한 자리
+        "redeleted": [],      # 도로 오류-삭제 처리한 자리
         "extras": [],         # 이메일·메모 복원
         "missing_outlet": [], # 매체를 찾지 못해 못 되살린 항목
         "check": [],          # 사람이 확인해야 할 항목 (같은 칸의 다른 사람 등)
@@ -129,6 +132,17 @@ def reapply_manual_state(session: Session, state: dict) -> dict:
             )
             _stamp(seat, None)
             report["reclosed"].append(f"{item['outlet']} {item['name']}")
+
+    # 1-2) 오류로 삭제했던 자리 — 파일이 도로 만들어 놨으면 다시 삭제 표시한다
+    for item in state.get("deleted_seats", []):
+        outlet = session.scalar(select(Outlet).where(Outlet.name == item["outlet"]))
+        if outlet is None:
+            report["missing_outlet"].append(f"{item['outlet']} {item['name']} (삭제)")
+            continue
+        seat = _find_active_seat(session, item, outlet)
+        if seat is not None and not seat.locked:
+            purge_assignment(session, seat)
+            report["redeleted"].append(f"{item['outlet']} {item['name']}")
 
     # 2) 손으로 만들거나 고친 활성 자리
     for item in state.get("active_seats", []):

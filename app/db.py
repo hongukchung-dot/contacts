@@ -88,6 +88,8 @@ MIGRATIONS = [
     # 2단계 인증(TOTP)
     "ALTER TABLE app_user ADD COLUMN IF NOT EXISTS totp_secret varchar(64)",
     "ALTER TABLE app_user ADD COLUMN IF NOT EXISTS totp_confirmed boolean NOT NULL DEFAULT false",
+    # '오류 삭제' 표시 (흔적 없는 삭제 → 기록 남기는 삭제로 전환)
+    "ALTER TABLE assignment ADD COLUMN IF NOT EXISTS deleted_at timestamptz",
 ]
 
 

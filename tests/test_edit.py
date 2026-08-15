@@ -166,14 +166,21 @@ class TestUpdate:
 # ── 삭제 ────────────────────────────────────────────────────────────────────
 
 class TestDelete:
-    def test_purge_removes_the_row_entirely(self, db_session, seoul):
+    def test_purge_hides_the_row_but_keeps_a_tombstone(self, db_session, seoul):
         target = next(a for a in current(db_session, seoul) if a.person.name == "곽소영")
         person_id = target.person_id
+        assignment_id = target.id
         purge_assignment(db_session, target)
         db_session.commit()
 
+        # 화면(활성 목록)에서는 사라진다
         assert [a.person.name for a in current(db_session, seoul)] == ["이경주"]
-        assert db_session.get(Person, person_id) is None, "남은 자리가 없으면 인물도 정리한다"
+        # 그러나 '오류 삭제' 기록은 남는다 — 다음 업로드가 조용히 되살리지 못하게
+        tombstone = db_session.get(Assignment, assignment_id)
+        assert tombstone is not None
+        assert tombstone.deleted_at is not None
+        assert tombstone.locked is True
+        assert db_session.get(Person, person_id) is not None
 
     def test_purge_keeps_person_with_other_seats(self, db_session, seoul):
         person = db_session.scalar(select(Person).where(Person.name == "곽소영"))
@@ -481,7 +488,9 @@ class TestDedupeDeskReporter:
         assert (removed, skipped) == (1, 0)
 
         kinds = db_session.scalars(
-            select(Assignment.kind).join(Person).where(Person.name == "이경주")
+            select(Assignment.kind)
+            .join(Person)
+            .where(Person.name == "이경주", Assignment.valid_to.is_(None))
         ).all()
         assert kinds == ["desk"]
 
