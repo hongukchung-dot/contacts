@@ -102,6 +102,35 @@ replace_line() {
     "$file" > "$file.tmp" && mv "$file.tmp" "$file"
 }
 
+get_env() { grep -E "^$1=" .env 2>/dev/null | head -1 | cut -d= -f2- || true; }
+
+# 이 포트를 (도커가 아닌) 다른 프로세스가 이미 쓰고 있는가
+port_busy() {
+  local port="$1"
+  if command -v ss >/dev/null 2>&1; then
+    ss -ltn 2>/dev/null | awk '{print $4}' | grep -qE "[:.]${port}\$"
+  elif command -v lsof >/dev/null 2>&1; then
+    lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1
+  else
+    return 1
+  fi
+}
+
+who_has_port() {
+  local port="$1"
+  if command -v ss >/dev/null 2>&1; then
+    sudo -n ss -lptn "sport = :${port}" 2>/dev/null | tail -n +2 \
+      || ss -ltn "sport = :${port}" 2>/dev/null | tail -n +2
+  fi
+}
+
+# 시작 포트부터 위로 올라가며 비어 있는 포트를 찾는다
+first_free_port() {
+  local port="$1"
+  while port_busy "$port"; do port=$((port + 1)); done
+  echo "$port"
+}
+
 if [ ! -f .env ]; then
   info ".env 가 없어 새로 만듭니다."
   cp .env.example .env
@@ -110,10 +139,40 @@ if [ ! -f .env ]; then
   replace_line SECRET_KEY "$SECRET" .env
   replace_line POSTGRES_PASSWORD "$DBPW" .env
   replace_line DATABASE_URL "postgresql+psycopg://contacts:${DBPW}@db:5432/contacts" .env
+
+  # 서버가 이미 80·443 을 쓰고 있으면 비어 있는 포트로 자동 회피한다.
+  if port_busy 80 || port_busy 443; then
+    NEW_HTTP=$(first_free_port 8080)
+    NEW_HTTPS=$(first_free_port 8443)
+    replace_line HTTP_PORT "$NEW_HTTP" .env
+    replace_line HTTPS_PORT "$NEW_HTTPS" .env
+    warn "이 서버는 이미 80/443 포트를 쓰고 있어 ${NEW_HTTP}/${NEW_HTTPS} 로 잡았습니다."
+    warn "80·443 을 쓰고 있는 프로세스:"
+    who_has_port 80 | sed 's/^/      /'
+    who_has_port 443 | sed 's/^/      /'
+  fi
   chmod 600 .env
   info "SECRET_KEY / DB 비밀번호를 자동 생성했습니다."
   info "도메인을 쓰려면 .env 의 SITE_ADDRESS 를 고친 뒤 ./deploy.sh 를 다시 실행하세요."
 fi
+
+# .env 가 이미 있는 경우에도 포트 충돌은 미리 잡아 준다.
+HTTP_PORT=$(get_env HTTP_PORT); HTTP_PORT=${HTTP_PORT:-80}
+HTTPS_PORT=$(get_env HTTPS_PORT); HTTPS_PORT=${HTTPS_PORT:-443}
+for spec in "HTTP_PORT:$HTTP_PORT" "HTTPS_PORT:$HTTPS_PORT"; do
+  key=${spec%%:*}; value=${spec##*:}
+  # 이미 우리 컨테이너가 물고 있는 경우는 충돌이 아니다 (재배포).
+  if port_busy "$value" && ! docker compose ps --format '{{.Publishers}}' 2>/dev/null | grep -q ":${value}->"; then
+    fail "$(printf '%s\n' \
+      "${value} 포트를 이미 다른 프로세스가 쓰고 있습니다." \
+      "" \
+      "$(who_has_port "$value")" \
+      "" \
+      ".env 의 ${key} 를 비어 있는 포트로 바꾼 뒤 다시 실행하세요. 예)" \
+      "    sed -i 's/^${key}=.*/${key}=$(first_free_port 8080)/' .env" \
+      "    ./deploy.sh")"
+  fi
+done
 
 mkdir -p backups
 chmod 700 backups
@@ -145,11 +204,15 @@ docker compose exec -T app python tools/init_db.py
 
 # ── 3. 안내 ─────────────────────────────────────────────────────────────────
 
-SITE=$(grep -E '^SITE_ADDRESS=' .env | cut -d= -f2- || true)
-SITE=${SITE:-:8080}
+SITE=$(get_env SITE_ADDRESS); SITE=${SITE:-:80}
+HOST_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
 case "$SITE" in
-  :*) URL="http://$(hostname -I 2>/dev/null | awk '{print $1}')${SITE}" ;;
-  *)  URL="https://${SITE}" ;;
+  :*)
+    if [ "$HTTP_PORT" = "80" ]; then URL="http://${HOST_IP}"; else URL="http://${HOST_IP}:${HTTP_PORT}"; fi
+    ;;
+  *)
+    if [ "$HTTPS_PORT" = "443" ]; then URL="https://${SITE}"; else URL="https://${SITE}:${HTTPS_PORT}"; fi
+    ;;
 esac
 
 echo
@@ -165,8 +228,10 @@ echo "   4) '파일 업로드' 에서 기준일이 오래된 파일부터 순서
 echo "        (26-0609) 출입기자 → (26-0609) 데스크(그룹) → (26-0731) 데스크 → (26-0803) 통합"
 echo
 case "$SITE" in
-  :*) warn "지금은 HTTP 입니다. 개인정보가 담긴 자료이므로 사내망/VPN 안에서만 쓰거나," ;;
-esac
-case "$SITE" in
-  :*) warn ".env 의 SITE_ADDRESS 에 도메인을 넣어 HTTPS 로 전환하세요." ;;
+  :*)
+    warn "지금은 HTTP 입니다. 실명·휴대전화번호가 담긴 자료이므로,"
+    warn "사내망/VPN 안에서만 쓰거나 .env 의 SITE_ADDRESS 에 도메인을 넣어 HTTPS 로 전환하세요."
+    warn "이미 다른 웹서버(nginx 등)가 80·443 을 쓰고 있다면, 그쪽에 아래 프록시를 추가하는 방법도 있습니다."
+    echo "      location / { proxy_pass http://127.0.0.1:${HTTP_PORT}; proxy_set_header Host \$host; }"
+    ;;
 esac

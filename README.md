@@ -43,16 +43,47 @@ cd contacts
 3. 스키마 생성 + 매체 사전(42개 매체·별칭) 시드 + 관리자 계정 생성
 4. 관리자 비밀번호를 화면에 **한 번만** 출력
 
+### 포트가 이미 쓰이고 있다면
+
+서버에서 이미 다른 서비스가 80·443 을 쓰고 있으면 `.env` 의 포트를 바꾸면 됩니다.
+첫 배포 때는 `deploy.sh` 가 충돌을 감지해 자동으로 빈 포트(8080·8443)를 잡아 줍니다.
+
+```bash
+HTTP_PORT=8080     # → http://<서버IP>:8080
+HTTPS_PORT=8443
+```
+
+무엇이 포트를 쓰고 있는지 확인:
+
+```bash
+sudo ss -lptn 'sport = :80'
+sudo ss -lptn 'sport = :443'
+```
+
+이미 nginx 등이 돌고 있다면, 그쪽에 리버스 프록시를 한 줄 추가하는 방법이 더 깔끔합니다.
+이 경우 기존 서버의 도메인·인증서를 그대로 쓰게 됩니다.
+
+```nginx
+location / {
+    proxy_pass http://127.0.0.1:8080;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    client_max_body_size 60m;
+}
+```
+
 ### 도메인과 HTTPS
 
-`.env` 의 `SITE_ADDRESS` 만 바꾸면 됩니다.
+`.env` 의 `SITE_ADDRESS` 를 바꾸면 Caddy 가 인증서를 자동 발급합니다.
 
 ```bash
 SITE_ADDRESS=contacts.example.com   # 인증서 자동 발급 (권장)
-SITE_ADDRESS=:8080                  # 도메인 없이 포트만 (사내망 전용)
+SITE_ADDRESS=:80                    # 도메인 없이 HTTP (사내망 전용)
 ```
 
-도메인을 쓰려면 80·443 포트가 열려 있고 DNS A 레코드가 이 서버를 가리켜야 합니다.
+단, 인증서 자동 발급은 **`HTTP_PORT=80`, `HTTPS_PORT=443` 이고 DNS A 레코드가
+이 서버를 가리킬 때만** 됩니다. 포트를 바꿔 쓰는 상황이라면 위의 nginx 프록시 방식을 쓰세요.
 특정 IP에서만 열고 싶으면 `Caddyfile` 의 `@notallowed` 블록 주석을 푸세요.
 
 ### 갱신

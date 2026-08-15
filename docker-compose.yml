@@ -33,11 +33,13 @@ services:
     image: caddy:2-alpine
     restart: unless-stopped
     depends_on: [app]
+    # 호스트 포트는 .env 의 HTTP_PORT / HTTPS_PORT 로 바꿀 수 있다.
+    # 서버에서 이미 80·443 을 쓰고 있으면 8080·8443 같은 빈 포트를 지정하면 된다.
     ports:
-      - "80:80"
-      - "443:443"
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
     environment:
-      SITE_ADDRESS: ${SITE_ADDRESS:-:8080}
+      SITE_ADDRESS: ${SITE_ADDRESS:-:80}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddydata:/data
