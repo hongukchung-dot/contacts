@@ -142,7 +142,9 @@ def matrix(session: Session, *, category: str | None = None) -> tuple[list[str],
     _attach_reporter_counts(session, rows)
 
     grouped: dict[str, list[OutletRow]] = {}
-    for row in sorted(rows.values(), key=lambda r: (r.sort_order, r.name)):
+    # sort_order 가 같은 매체(기타 분류는 전부 9000)는
+    # 데스크 있는 매체 가나다순 → 데스크 없는 매체 가나다순.
+    for row in sorted(rows.values(), key=lambda r: (r.sort_order, not r.cells, r.name)):
         grouped.setdefault(row.category, []).append(row)
 
     ordered: list[tuple[str, list[OutletRow]]] = []
