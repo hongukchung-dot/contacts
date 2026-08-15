@@ -21,6 +21,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from sqlalchemy import delete, func, select  # noqa: E402
 
+from app.config import get_settings  # noqa: E402
 from app.db import session_scope  # noqa: E402
 from app.models import (  # noqa: E402
     APPROVED,
@@ -36,6 +37,11 @@ from app.services.ingest import (  # noqa: E402
     DuplicateFileError,
     apply_change_set,
     stage_file,
+)
+from app.services.manual_backup import (  # noqa: E402
+    collect_manual_state,
+    reapply_manual_state,
+    save_backup,
 )
 
 LABEL = {"new": "신규", "update": "변경", "conflict": "확인필요", "remove": "삭제"}
@@ -197,17 +203,41 @@ def main() -> int:
     if not args.yes:
         print("\n계획만 출력했습니다. 실제로 다시 만들려면 --yes 를 붙여 주세요.")
         if before["locked"]:
-            print(f"  ⚠ 손으로 고친 {before['locked']}건은 사라집니다. 필요하면 먼저 기록해 두세요.")
+            print(f"  · 손으로 고친 {before['locked']}건은 자동으로 백업했다가 재적재 후 다시 얹습니다.")
+            print("    (단, 흔적 없이 삭제했던 자리는 되살릴 기록이 없어 다시 나타날 수 있습니다)")
         return 0
 
-    if before["locked"]:
-        print(f"\n⚠ 손으로 고친 {before['locked']}건이 사라집니다.")
+    # 손으로 고친 내용을 지웠다가 재적재 후 다시 얹는다.
+    with session_scope() as session:
+        manual_state = collect_manual_state(session)
+    backup_path = save_backup(manual_state, get_settings().upload_dir / "manual-backups")
+    manual_total = len(manual_state["active_seats"]) + len(manual_state["closed_seats"])
+    print(f"\n· 손으로 고친 {manual_total}건 + 이메일·메모 {len(manual_state['person_extras'])}건 백업")
+    print(f"  → {backup_path}")
 
     print("\n· 기존 인물·자리·업로드 이력을 지웁니다 (계정·매체 사전·접속 기록은 유지) …")
     wipe()
 
     print("· 원본 파일을 기준일 순서로 다시 넣습니다 …\n")
     reload_sources(sources, approve_all=args.approve_all)
+
+    if manual_total or manual_state["person_extras"]:
+        print("\n· 손으로 고친 내용을 다시 얹습니다 …")
+        with session_scope() as session:
+            manual_report = reapply_manual_state(session, manual_state)
+        if manual_report["restored"]:
+            print(f"  복원한 자리 {len(manual_report['restored'])}건: "
+                  + ", ".join(manual_report["restored"][:10])
+                  + (" …" if len(manual_report["restored"]) > 10 else ""))
+        if manual_report["reclosed"]:
+            print(f"  도로 마감한 자리 {len(manual_report['reclosed'])}건: "
+                  + ", ".join(manual_report["reclosed"][:10]))
+        if manual_report["extras"]:
+            print(f"  이메일·메모 복원 {len(manual_report['extras'])}명")
+        for line in manual_report["missing_outlet"]:
+            print(f"  ! 매체를 찾지 못해 못 되살림: {line}")
+        for line in manual_report["check"]:
+            print(f"  ⚠ 확인 필요: {line}")
 
     report_lookalike_outlets()
 
