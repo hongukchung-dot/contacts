@@ -302,6 +302,20 @@ docker compose exec app python tools/merge_outlets.py --from 헤럴드 --into �
 자리와 번호 이력이 남는 쪽으로 모이고, 같은 매체에 같은 이름이 둘이 되면 인물도 합쳐집니다.
 없어진 이름은 별칭으로 남아 다음 업로드부터 바로 잡힙니다.
 
+### 데스크가 출입기자로도 겹쳐 등록돼 있다면
+
+파일마다 성격이 달라(데스크 현황 + 출입기자 현황) 같은 사람이 같은 매체에
+데스크와 출입기자로 모두 잡히는 경우가 있습니다. 데스크만 남기고 정리합니다.
+
+```bash
+docker compose exec app python tools/dedupe_roles.py         # 무엇이 지워질지 확인
+docker compose exec app python tools/dedupe_roles.py --yes   # 실제로 지우기
+```
+
+이름·전화번호·매체가 모두 같은 경우만 지우며(동명이인 보호), 손으로 고친
+자리는 건드리지 않습니다. 파일을 새로 적재하거나 rebuild 한 뒤에는 한 번 더
+돌리면 됩니다.
+
 ---
 
 ## 4. 화면에서 직접 넣고 고치기

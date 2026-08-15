@@ -437,3 +437,101 @@ class TestMergeOutlets:
         keep, _ = split
         with pytest.raises(_EditError):
             merge_outlets(db_session, keep, keep)
+
+
+class TestDedupeDeskReporter:
+    """같은 매체·이름·번호가 데스크와 출입기자로 겹치면 출입기자를 지운다."""
+
+    @pytest.fixture()
+    def outlet(self, db_session):
+        return db_session.scalar(select(Outlet).where(Outlet.name == "서울신문"))
+
+    def _seat(self, db_session, outlet, name, phone, kind, *, locked=False):
+        """파일 적재로 들어온 자리처럼 만든다 (직접 입력과 달리 잠기지 않음)."""
+        if kind == "desk":
+            fields = form(name=name, phone=phone, role_slot="산업부장", role_label="산업부장")
+        else:
+            fields = form(name=name, phone=phone, kind="reporter", role_slot="", role_label="차장")
+        create_assignment(db_session, outlet, parse_form(fields), user=None)
+        db_session.flush()
+        seat = db_session.scalars(
+            select(Assignment).join(Person).where(Person.name == name, Assignment.kind == kind)
+        ).all()[-1]
+        seat.locked = locked
+        return seat
+
+    def _desk(self, db_session, outlet, name, phone):
+        return self._seat(db_session, outlet, name, phone, "desk")
+
+    def _reporter(self, db_session, outlet, name, phone):
+        return self._seat(db_session, outlet, name, phone, "reporter")
+
+    def test_same_person_reporter_seat_is_removed(self, db_session, outlet):
+        from app.services.edit import find_desk_reporter_overlaps, remove_desk_reporter_overlaps
+
+        self._desk(db_session, outlet, "이경주", "010-5283-1856")
+        self._reporter(db_session, outlet, "이경주", "010-5283-1856")
+        db_session.commit()
+
+        overlaps = find_desk_reporter_overlaps(db_session)
+        assert [(o.outlet_name, o.person_name) for o in overlaps] == [("서울신문", "이경주")]
+
+        removed, skipped = remove_desk_reporter_overlaps(db_session)
+        db_session.commit()
+        assert (removed, skipped) == (1, 0)
+
+        kinds = db_session.scalars(
+            select(Assignment.kind).join(Person).where(Person.name == "이경주")
+        ).all()
+        assert kinds == ["desk"]
+
+    def test_reporter_without_desk_is_kept(self, db_session, outlet):
+        from app.services.edit import find_desk_reporter_overlaps
+
+        self._reporter(db_session, outlet, "곽소영", "010-1234-0001")
+        db_session.commit()
+        assert find_desk_reporter_overlaps(db_session) == []
+
+    def test_same_name_different_phone_is_kept(self, db_session, outlet):
+        """번호가 다르면 동명이인일 수 있으므로 지우지 않는다."""
+        from datetime import date
+
+        from app.ingest.normalize import normalize_key
+        from app.services.edit import find_desk_reporter_overlaps
+
+        # 이름은 같고 번호가 다른 두 인물 행을 직접 만든다
+        a = Person(name="김철수", name_key=normalize_key("김철수"), phone="01011110001")
+        b = Person(name="김철수", name_key=normalize_key("김철수"), phone="01022220002")
+        db_session.add_all([a, b])
+        db_session.flush()
+        db_session.add_all([
+            Assignment(person_id=a.id, outlet_id=outlet.id, kind="desk",
+                       role_slot="산업부장", role_label="산업부장", rank="부장", rank_order=30,
+                       valid_from=date.today()),
+            Assignment(person_id=b.id, outlet_id=outlet.id, kind="reporter",
+                       role_label="차장", rank="차장", rank_order=40,
+                       valid_from=date.today()),
+        ])
+        db_session.commit()
+        assert find_desk_reporter_overlaps(db_session) == []
+
+    def test_same_outlet_only(self, db_session):
+        """다른 매체의 출입기자 자리는 겹침이 아니다 (데스크 겸 타사 출입 아님)."""
+        from app.services.edit import find_desk_reporter_overlaps
+
+        seoul = db_session.scalar(select(Outlet).where(Outlet.name == "서울신문"))
+        hankook = db_session.scalar(select(Outlet).where(Outlet.name == "한국일보"))
+        self._desk(db_session, seoul, "박영희", "010-3333-0003")
+        self._reporter(db_session, hankook, "박영희", "010-3333-0003")
+        db_session.commit()
+        assert find_desk_reporter_overlaps(db_session) == []
+
+    def test_locked_reporter_seat_is_skipped(self, db_session, outlet):
+        from app.services.edit import remove_desk_reporter_overlaps
+
+        self._desk(db_session, outlet, "최민수", "010-4444-0004")
+        self._seat(db_session, outlet, "최민수", "010-4444-0004", "reporter", locked=True)
+        db_session.commit()
+
+        removed, skipped = remove_desk_reporter_overlaps(db_session)
+        assert (removed, skipped) == (0, 1)

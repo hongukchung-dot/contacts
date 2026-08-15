@@ -402,3 +402,77 @@ def dedupe_people_in_outlet(session: Session, outlet: Outlet) -> int:
             merge_persons(session, keep_person, other, user=None)
             merged += 1
     return merged
+
+
+# ── 데스크·출입기자 중복 정리 ───────────────────────────────────────────────
+
+@dataclass
+class RoleOverlap:
+    """같은 매체에 데스크와 출입기자로 겹쳐 등록된 사람의 출입기자 자리."""
+
+    assignment_id: int
+    outlet_name: str
+    person_name: str
+    role_label: str | None
+    locked: bool
+
+
+def find_desk_reporter_overlaps(session: Session) -> list[RoleOverlap]:
+    """이름·전화번호·매체가 같은데 데스크와 출입기자로 모두 등록된 경우를 찾는다.
+
+    같은 인물(person_id)이 두 자리를 쥔 경우가 대부분이고,
+    인물이 둘로 갈라졌지만 이름·번호가 같은 경우도 잡는다.
+    돌려주는 것은 지워야 할 **출입기자 쪽** 자리 목록이다.
+    """
+    rows = session.execute(
+        select(Assignment, Person, Outlet)
+        .join(Person, Assignment.person_id == Person.id)
+        .join(Outlet, Assignment.outlet_id == Outlet.id)
+        .where(Assignment.valid_to.is_(None))
+    ).all()
+
+    desk_by_person: set[tuple[int, int]] = set()
+    desk_by_name_phone: set[tuple[int, str, str]] = set()
+    for assignment, person, _outlet in rows:
+        if assignment.kind == "desk":
+            desk_by_person.add((assignment.outlet_id, person.id))
+            if person.phone:
+                desk_by_name_phone.add((assignment.outlet_id, person.name_key, person.phone))
+
+    overlaps: list[RoleOverlap] = []
+    for assignment, person, outlet in rows:
+        if assignment.kind != "reporter":
+            continue
+        same_person = (assignment.outlet_id, person.id) in desk_by_person
+        same_name_phone = bool(person.phone) and (
+            (assignment.outlet_id, person.name_key, person.phone) in desk_by_name_phone
+        )
+        if same_person or same_name_phone:
+            overlaps.append(
+                RoleOverlap(
+                    assignment_id=assignment.id,
+                    outlet_name=outlet.name,
+                    person_name=person.name,
+                    role_label=assignment.role_label,
+                    locked=assignment.locked,
+                )
+            )
+    return overlaps
+
+
+def remove_desk_reporter_overlaps(session: Session) -> tuple[int, int]:
+    """겹치는 출입기자 자리를 지운다. 데스크 자리는 남긴다.
+
+    손으로 고친(locked) 자리는 건드리지 않는다. (지운 수, 건너뛴 수)를 돌려준다.
+    """
+    removed = skipped = 0
+    for overlap in find_desk_reporter_overlaps(session):
+        if overlap.locked:
+            skipped += 1
+            continue
+        assignment = session.get(Assignment, overlap.assignment_id)
+        if assignment is None:
+            continue
+        purge_assignment(session, assignment)
+        removed += 1
+    return removed, skipped
