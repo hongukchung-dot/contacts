@@ -163,6 +163,43 @@ class TestFullCycle:
         assert "login" in page.text
 
 
+class TestUserDeletion:
+    """계정 관리의 삭제 버튼."""
+
+    def _create_user(self, auth):
+        response = auth.post(
+            "/admin/users", data={"username": "temp", "display_name": "임시", "role": "viewer"}
+        )
+        assert response.status_code == 303
+
+    def test_admin_can_delete_another_user(self, auth, db_session):
+        from app.models import AppUser
+        from sqlalchemy import select
+
+        self._create_user(auth)
+        target_id = db_session.scalar(select(AppUser.id).where(AppUser.username == "temp"))
+        response = auth.post(f"/admin/users/{target_id}/delete")
+        assert response.status_code == 303
+        assert db_session.scalar(select(AppUser).where(AppUser.username == "temp")) is None
+        # 감사 기록은 남는다
+        assert "delete_user" in auth.get("/admin/users").text
+
+    def test_cannot_delete_self(self, auth, admin):
+        response = auth.post(f"/admin/users/{admin.id}/delete")
+        assert response.status_code == 400
+
+    def test_deleting_user_keeps_their_audit_rows(self, auth, db_session):
+        from sqlalchemy import select
+
+        from app.models import AppUser, AuditLog
+
+        self._create_user(auth)
+        target_id = db_session.scalar(select(AppUser.id).where(AppUser.username == "temp"))
+        auth.post(f"/admin/users/{target_id}/delete")
+        rows = db_session.scalars(select(AuditLog).where(AuditLog.detail == "temp(viewer)")).all()
+        assert any(r.action == "create_user" for r in rows)
+
+
 class TestLoginLockout:
     """무차별 대입 방어: 짧은 시간에 실패가 몰리면 잠근다."""
 

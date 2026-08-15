@@ -985,3 +985,21 @@ async def admin_toggle_user(
     log_action(db, user, "toggle_user", f"{target.username} → {'활성' if target.active else '중지'}", None)
     db.commit()
     return RedirectResponse("/admin/users", status_code=303)
+
+
+@app.post("/admin/users/{user_id}/delete")
+async def admin_delete_user(
+    user_id: int,
+    user: AppUser = Depends(require_admin),
+    db: Session = Depends(get_db),
+) -> Response:
+    target = db.get(AppUser, user_id)
+    if target is None:
+        raise HTTPException(status_code=404, detail="계정을 찾을 수 없습니다.")
+    if target.id == user.id:
+        raise HTTPException(status_code=400, detail="자기 계정은 삭제할 수 없습니다.")
+    # 접속·조회 기록에는 아이디 문자열이 남으므로 이력은 지워지지 않는다.
+    log_action(db, user, "delete_user", f"{target.username}({target.role})", None)
+    db.delete(target)
+    db.commit()
+    return RedirectResponse("/admin/users", status_code=303)

@@ -47,6 +47,10 @@
           <form method="post" action="/admin/users/{{ item.id }}/toggle">
             <button class="btn small" type="submit">{{ '중지' if item.active else '사용' }}</button>
           </form>
+          <form method="post" action="/admin/users/{{ item.id }}/delete">
+            <button class="btn small danger" type="submit"
+              onclick="return confirm('{{ item.username }} 계정을 삭제할까요?\n접속 기록은 남지만 계정은 되돌릴 수 없습니다.')">삭제</button>
+          </form>
           {% endif %}
         </td>
       </tr>
