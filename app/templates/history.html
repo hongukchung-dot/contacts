@@ -31,8 +31,8 @@
         <td>{{ change.outlet_name }}</td>
         <td>{% if change.person_id %}<a href="/person/{{ change.person_id }}">{{ change.person_name }}</a>{% else %}{{ change.person_name }}{% endif %}</td>
         <td>{{ {'phone':'번호','role':'직책','assignment':'자리'}.get(change.field, change.field) }}</td>
-        <td class="muted">{{ change.old_value or '—' }}</td>
-        <td>{{ change.new_value or '—' }}</td>
+        <td class="muted">{{ phone_spans(change.old_value) if change.old_value else '—' }}</td>
+        <td>{{ phone_spans(change.new_value) if change.new_value else '—' }}</td>
         <td class="muted">{{ change.change_set.source_file.as_of }} · {{ change.change_set.source_file.filename }}</td>
       </tr>
     {% else %}

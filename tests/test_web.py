@@ -218,13 +218,28 @@ class TestHighlighting:
         body = auth.get("/").text.split("<tbody>", 1)[1]
         assert "person recent" not in body
 
-    def test_later_change_is_highlighted(self, auth):
-        for name in ("sample_desk_matrix.xlsx", "sample_combined.docx"):
+    def test_later_change_is_highlighted(self, auth, db_session):
+        """설치 당일의 연속 적재는 초기 적재, 그 뒤의 갱신부터 음영이 붙는다."""
+        from datetime import timedelta
+
+        from sqlalchemy import update
+
+        from app.models import ChangeSet
+
+        def load(name: str):
             response = upload(auth, name)
             review_url = response.headers["location"]
             page = auth.get(review_url)
             ids = re.findall(r'name="approve" value="(\d+)"', page.text)
             auth.post(f"{review_url}/apply", data={"approve": ids})
 
+        load("sample_desk_matrix.xlsx")
+        # 초기 적재를 하루 전으로 되돌려 '나중의 갱신' 상황을 만든다
+        db_session.execute(
+            update(ChangeSet).values(applied_at=ChangeSet.applied_at - timedelta(days=1))
+        )
+        db_session.commit()
+
+        load("sample_combined.docx")
         body = auth.get("/").text.split("<tbody>", 1)[1]
         assert "person recent" in body

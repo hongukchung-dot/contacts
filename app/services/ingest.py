@@ -175,6 +175,9 @@ def _build_changes(
     covered_desk_slots: dict[int, set[str | None]] = {}
     covered_reporter_outlets: set[int] = set()
     matched_assignment_ids: set[int] = set()
+    # 이 파일에 (그 매체 소속으로) 이름이 보인 사람들.
+    # 부서·직책·구분이 바뀌었을 뿐인데 삭제로 잡히면 안 되므로 별도로 모은다.
+    seen_person_outlet: set[tuple[int, int]] = set()
 
     for record in records:
         outlet = outlets[record.outlet]
@@ -211,6 +214,7 @@ def _build_changes(
             continue
 
         payload["person_id"] = person_id
+        seen_person_outlet.add((person_id, outlet.id))
         person = current["persons"][person_id]
 
         # (1) 번호 변경
@@ -294,6 +298,7 @@ def _build_changes(
         covered_desk_slots,
         covered_reporter_outlets,
         matched_assignment_ids,
+        seen_person_outlet,
         as_of,
     )
 
@@ -399,16 +404,23 @@ def _detect_removals(
     covered_desk_slots: dict[int, set[str | None]],
     covered_reporter_outlets: set[int],
     matched_assignment_ids: set[int],
+    seen_person_outlet: set[tuple[int, int]],
     as_of: date,
 ) -> None:
     """파일에서 사라진 사람을 찾는다.
 
-    파일마다 다루는 범위가 다르므로(예: 7/31 파일에는 '대표' 열이 없다)
-    **그 파일이 실제로 담고 있는 (매체, 구분, 직책) 범위 안에서만** 삭제로 본다.
-    범위 밖까지 삭제하면 다른 파일이 채운 정보가 날아간다.
+    두 가지를 지킨다.
+
+    1. 파일마다 다루는 범위가 다르므로(예: 7/31 파일에는 '대표' 열이 없다)
+       **그 파일이 실제로 담고 있는 (매체, 구분, 직책) 범위 안에서만** 삭제로 본다.
+    2. **그 매체에 이름이 보인 사람은 삭제로 보지 않는다.** 출입기자였다가 데스크로
+       올라가거나 부서가 바뀐 것뿐인데 삭제로 잡히면 안 되기 때문이다.
+       그런 이동은 이미 '변경'으로 따로 기록된다.
     """
     for assignment in current["assignments"]:
         if assignment.id in matched_assignment_ids:
+            continue
+        if (assignment.person_id, assignment.outlet_id) in seen_person_outlet:
             continue
         in_scope = False
         if assignment.kind == "desk":
@@ -480,10 +492,7 @@ def apply_change_set(session: Session, change_set: ChangeSet, *, applied_by_id: 
     as_of = change_set.source_file.as_of
     counts = {NEW: 0, UPDATE: 0, REMOVE: 0, CONFLICT: 0, "skipped": 0}
 
-    # 반영 직전에 판단해야 정확하다: 지금 DB가 비어 있으면 이건 초기 적재다.
-    change_set.is_initial = (
-        session.scalar(select(Assignment.id).where(Assignment.valid_to.is_(None)).limit(1)) is None
-    )
+    change_set.is_initial = _is_initial_load(session)
 
     for change in change_set.changes:
         if change.applied:
@@ -509,6 +518,30 @@ def apply_change_set(session: Session, change_set: ChangeSet, *, applied_by_id: 
     change_set.applied_by_id = applied_by_id
     session.flush()
     return counts
+
+
+def _is_initial_load(session: Session) -> bool:
+    """이 반영이 '처음 자리 잡는 적재'인가.
+
+    설치할 때는 4개 파일을 연달아 올리게 되는데, 그 전부가 '신규'라서
+    변동 음영을 넣으면 표 전체가 노랗게 된다. 그래서
+      · DB가 비어 있거나
+      · 첫 반영과 같은 날에 이뤄진 반영
+    은 초기 적재로 보고 음영에서 제외한다. 그 이후의 갱신부터 음영이 붙는다.
+    """
+    if session.scalar(select(Assignment.id).limit(1)) is None:
+        return True
+    first_applied = session.scalar(
+        select(ChangeSet.applied_at)
+        .where(ChangeSet.status == APPLIED, ChangeSet.applied_at.is_not(None))
+        .order_by(ChangeSet.applied_at)
+        .limit(1)
+    )
+    if first_applied is None:
+        return True
+    from datetime import datetime, timezone
+
+    return first_applied.date() == datetime.now(timezone.utc).date()
 
 
 def _get_or_create_person(session: Session, change: Change) -> Person:

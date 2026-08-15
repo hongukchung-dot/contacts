@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import shutil
 import tempfile
 from datetime import date, datetime
@@ -11,6 +12,7 @@ from fastapi import Depends, FastAPI, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from markupsafe import Markup, escape
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -48,6 +50,8 @@ from .services.ingest import DuplicateFileError, apply_change_set, reject_all_pe
 app = FastAPI(title="언론사 주소록", docs_url=None, redoc_url=None, openapi_url=None)
 app.mount("/static", StaticFiles(directory=BASE_DIR / "app" / "static"), name="static")
 
+_PHONE_IN_TEXT = re.compile(r"01[016-9]-\d{3,4}-\d{4}")
+
 templates = Jinja2Templates(directory=str(BASE_DIR / "app" / "templates"))
 templates.env.globals["format_phone"] = format_phone
 
@@ -61,7 +65,21 @@ def mask_phone(digits: str | None) -> str:
     return f"{head}-{'●' * len(mid)}-{tail}"
 
 
+def phone_spans(text: str | None, mask: bool = True) -> Markup:
+    """문장 속 전화번호를 클릭해서 보는 스팬으로 바꾼다. (변경 이력 등 목록 화면용)"""
+    if not text:
+        return Markup("")
+
+    def replace(match: re.Match[str]) -> str:
+        raw = match.group(0)
+        shown = mask_phone(re.sub(r"\D", "", raw)) if mask else raw
+        return f'<span class="phone" data-phone="{escape(raw)}">{escape(shown)}</span>'
+
+    return Markup(_PHONE_IN_TEXT.sub(replace, escape(text)))
+
+
 templates.env.globals["mask_phone"] = mask_phone
+templates.env.globals["phone_spans"] = phone_spans
 templates.env.globals["ROLES"] = ROLES
 
 CHANGE_TYPE_LABEL = {

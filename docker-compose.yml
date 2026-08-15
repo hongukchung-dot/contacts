@@ -1,0 +1,71 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-contacts}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD를 .env에 설정하세요}
+      POSTGRES_DB: ${POSTGRES_DB:-contacts}
+      TZ: Asia/Seoul
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-contacts}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    # DB 포트는 외부로 열지 않는다. 앱 컨테이너에서만 접근한다.
+
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-contacts}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-contacts}
+      UPLOAD_DIR: /app/data/uploads
+    volumes:
+      - uploads:/app/data/uploads
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on: [app]
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:-:8080}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddydata:/data
+      - caddyconfig:/config
+
+  backup:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_USER: ${POSTGRES_USER:-contacts}
+      POSTGRES_DB: ${POSTGRES_DB:-contacts}
+    volumes:
+      - ./backups:/backups
+    # 매일 03:00(KST)에 덤프를 뜨고 14일치만 남긴다.
+    entrypoint: >
+      sh -c 'while true; do
+        sleep $$(( ( $$(date -d "tomorrow 03:00" +%s) - $$(date +%s) ) % 86400 ));
+        pg_dump -h db -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -Fc
+          -f /backups/contacts_$$(date +%Y%m%d_%H%M).dump || true;
+        find /backups -name "contacts_*.dump" -mtime +14 -delete || true;
+      done'
+
+volumes:
+  pgdata:
+  uploads:
+  caddydata:
+  caddyconfig:

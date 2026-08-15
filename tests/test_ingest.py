@@ -309,3 +309,33 @@ def _keep_sheets(tmp_path: Path, fixture: str, keep: set[str]) -> Path:
         del workbook[title]
     workbook.save(target)
     return target
+
+
+class TestRemovalFalsePositives:
+    """부서·구분이 바뀐 것뿐인 사람을 삭제로 잡으면 안 된다."""
+
+    @pytest.fixture()
+    def seeded(self, db_session):
+        apply(db_session, load(db_session, "sample_reporter_list.xlsx"))
+        return db_session
+
+    def test_reporter_promoted_to_desk_is_not_a_removal(self, seeded):
+        """이길성은 6/9 파일엔 출입기자, 8/3 파일엔 데스크로 나온다."""
+        change_set = load(seeded, "sample_combined.docx")
+        removed = {c.person_name for c in change_set.changes if c.change_type == REMOVE}
+        assert "이길성" not in removed
+        assert "전수용" not in removed
+        assert "정한국" not in removed
+
+    def test_dept_change_is_not_a_removal(self, seeded):
+        change_set = load(seeded, "sample_combined.docx")
+        removed = {c.person_name for c in change_set.changes if c.change_type == REMOVE}
+        assert "석민수" not in removed
+        assert "박예원" not in removed
+
+    def test_genuinely_absent_person_is_still_flagged(self, seeded):
+        """반대로 정말 빠진 사람은 계속 잡아야 한다."""
+        apply(seeded, load(seeded, "sample_desk_matrix.xlsx"))
+        change_set = load(seeded, "sample_combined.docx")
+        removed = {c.person_name for c in change_set.changes if c.change_type == REMOVE}
+        assert "신수정" in removed  # 동아일보 산업2부장 — docx 에 없음
