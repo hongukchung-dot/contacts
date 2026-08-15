@@ -131,7 +131,37 @@ first_free_port() {
   echo "$port"
 }
 
+compose_project() {
+  # compose 는 디렉터리명을 소문자로 바꾸고 허용되지 않는 문자를 지워 프로젝트명을 만든다.
+  echo "${COMPOSE_PROJECT_NAME:-$(basename "$PWD" | tr '[:upper:]' '[:lower:]' | tr -cd '[:alnum:]_-')}"
+}
+
+db_volume_exists() {
+  [ -n "$(docker volume ls -q \
+      --filter "label=com.docker.compose.project=$(compose_project)" \
+      --filter "label=com.docker.compose.volume=pgdata" 2>/dev/null)" ]
+}
+
 if [ ! -f .env ]; then
+  # PostgreSQL 은 데이터 볼륨이 처음 만들어질 때만 계정/비밀번호를 잡는다.
+  # .env 만 새로 만들면 새 비밀번호와 기존 볼륨의 옛 비밀번호가 어긋나 인증이 실패한다.
+  if db_volume_exists; then
+    fail "$(cat <<'MSG'
+.env 는 없는데 DB 데이터 볼륨은 이미 있습니다.
+
+PostgreSQL 비밀번호는 볼륨을 처음 만들 때 한 번만 정해집니다.
+지금 .env 를 새로 만들면 비밀번호가 어긋나 접속이 실패합니다. 둘 중 하나를 고르세요.
+
+  1) DB를 비우고 처음부터 (아직 자료를 안 넣었다면 이쪽)
+       docker compose down -v
+       ./deploy.sh
+
+  2) 자료를 지키고 싶다면 — 먼저 백업하고 비밀번호를 맞춥니다
+       docker compose exec backup /scripts/backup.sh --once   # ./backups 에 덤프 생성
+       그다음 예전 .env 의 POSTGRES_PASSWORD / DATABASE_URL 값을 되살리세요.
+MSG
+)"
+  fi
   info ".env 가 없어 새로 만듭니다."
   cp .env.example .env
   SECRET=$(openssl rand -hex 32)
@@ -200,7 +230,21 @@ for _ in $(seq 1 30); do
 done
 
 info "스키마 초기화 및 매체 사전 시드 …"
-docker compose exec -T app python tools/init_db.py
+if ! docker compose exec -T app python tools/init_db.py 2> >(tee /tmp/contacts_init_err.log >&2); then
+  if grep -q "password authentication failed" /tmp/contacts_init_err.log 2>/dev/null; then
+    fail "$(cat <<'MSG'
+DB 비밀번호가 맞지 않습니다.
+
+.env 의 비밀번호와 DB 볼륨이 처음 만들어질 때 정해진 비밀번호가 다릅니다.
+아직 자료를 넣지 않았다면 볼륨을 지우고 다시 만드는 게 가장 빠릅니다.
+
+    docker compose down -v
+    ./deploy.sh
+MSG
+)"
+  fi
+  fail "초기화에 실패했습니다. 'docker compose logs app' 과 위 오류를 확인하세요."
+fi
 
 # ── 3. 안내 ─────────────────────────────────────────────────────────────────
 
