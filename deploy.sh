@@ -254,7 +254,7 @@ PORT_SUFFIX=""
 
 echo
 info "완료. 접속이 되는지 먼저 서버 안에서 확인합니다 …"
-if curl -fsS -o /dev/null "http://127.0.0.1:${HTTP_PORT}/login" 2>/dev/null; then
+if curl -fsS -o /dev/null "http://127.0.0.1:${HTTP_PORT}/healthz" 2>/dev/null; then
   echo "      ✓ 앱 응답 정상 (http://127.0.0.1:${HTTP_PORT})"
 else
   warn "앱이 아직 응답하지 않습니다. 'docker compose logs app caddy' 를 확인하세요."

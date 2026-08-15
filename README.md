@@ -86,6 +86,27 @@ SITE_ADDRESS=:80                    # 도메인 없이 HTTP (사내망 전용)
 이 서버를 가리킬 때만** 됩니다. 포트를 바꿔 쓰는 상황이라면 위의 nginx 프록시 방식을 쓰세요.
 특정 IP에서만 열고 싶으면 `Caddyfile` 의 `@notallowed` 블록 주석을 푸세요.
 
+### 접속이 안 될 때
+
+먼저 서버 안에서 앱이 살아 있는지 확인합니다. `ok` 가 나오면 앱은 정상이고 접속 경로만 문제입니다.
+
+```bash
+curl http://127.0.0.1:8080/healthz     # → ok
+```
+
+> `curl -I` 는 HEAD 요청이라 `405 Method Not Allowed` 가 정상입니다. 오류가 아닙니다.
+
+그다음 접속 가능한 주소를 확인합니다.
+
+```bash
+hostname -I              # 이 서버가 가진 IP 전부
+tailscale ip -4          # Tailscale 을 쓴다면 (이 주소가 가장 안전)
+sudo ufw status          # 방화벽이 포트를 막고 있지 않은지
+sudo ufw allow 8080/tcp  # 막혀 있다면 열기
+```
+
+클라우드(AWS·오라클 등)라면 콘솔의 보안 그룹에서도 해당 포트 인바운드를 열어야 합니다.
+
 ### 갱신
 
 ```bash
