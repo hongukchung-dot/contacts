@@ -163,6 +163,24 @@ class TestFullCycle:
         assert "login" in page.text
 
 
+class TestReporterOnlyOutlets:
+    """데스크 없이 출입기자만 있는 매체도 매트릭스에 행으로 나와야 한다."""
+
+    def test_reporter_only_outlet_appears_in_matrix(self, auth):
+        response = upload(auth, "sample_reporter_list.xlsx")
+        assert response.status_code == 303
+        review_url = response.headers["location"]
+        page = auth.get(review_url)
+        ids = re.findall(r'name="approve" value="(\d+)"', page.text)
+        change_set_id = review_url.rsplit("/", 1)[-1]
+        auth.post(f"/review/{change_set_id}/apply", data={"approve": ids})
+
+        body = auth.get("/").text
+        # 이 파일의 인원은 전부 출입기자 — 그래도 매체 행과 인원 배지가 보여야 한다
+        assert "국민일보" in body
+        assert "출입" in body
+
+
 class TestPermissions:
     @pytest.fixture()
     def viewer(self, client, db_session):

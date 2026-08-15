@@ -65,6 +65,7 @@ class OutletRow:
     id: int
     name: str
     category: str
+    sort_order: int = 0
     cells: dict[str, list[Entry]] = field(default_factory=dict)
     reporter_count: int = 0
     recent_change_count: int = 0
@@ -106,7 +107,10 @@ def matrix(session: Session, *, category: str | None = None) -> tuple[list[str],
         outlet = assignment.outlet
         row = rows.get(outlet.id)
         if row is None:
-            row = OutletRow(id=outlet.id, name=outlet.name, category=outlet.category)
+            row = OutletRow(
+                id=outlet.id, name=outlet.name, category=outlet.category,
+                sort_order=outlet.sort_order,
+            )
             rows[outlet.id] = row
         slot = assignment.role_slot or "기타"
         entry = _entry(assignment, cutoff, seed_files)
@@ -114,10 +118,31 @@ def matrix(session: Session, *, category: str | None = None) -> tuple[list[str],
         if entry.is_recent:
             row.recent_change_count += 1
 
+    # 데스크가 한 명도 없는 매체(기타 분류에 흔하다)도 출입기자가 있으면 행으로 보여 준다.
+    # 빈 행이 아니라 매체명 클릭 → 출입기자 팝업의 입구가 된다.
+    reporter_only_stmt = (
+        select(Outlet)
+        .join(Assignment, Assignment.outlet_id == Outlet.id)
+        .where(
+            Assignment.valid_to.is_(None),
+            Assignment.kind == "reporter",
+            Outlet.active.is_(True),
+        )
+        .distinct()
+    )
+    if category:
+        reporter_only_stmt = reporter_only_stmt.where(Outlet.category == category)
+    for outlet in session.scalars(reporter_only_stmt).all():
+        if outlet.id not in rows:
+            rows[outlet.id] = OutletRow(
+                id=outlet.id, name=outlet.name, category=outlet.category,
+                sort_order=outlet.sort_order,
+            )
+
     _attach_reporter_counts(session, rows)
 
     grouped: dict[str, list[OutletRow]] = {}
-    for row in rows.values():
+    for row in sorted(rows.values(), key=lambda r: (r.sort_order, r.name)):
         grouped.setdefault(row.category, []).append(row)
 
     ordered: list[tuple[str, list[OutletRow]]] = []
