@@ -33,6 +33,31 @@
     document.body.style.overflow = "";
   }
 
+  // navigator.clipboard 는 HTTPS·localhost 에서만 존재한다.
+  // Tailscale IP 등 일반 HTTP 접속에서도 복사가 되도록 구식 방법으로 폴백한다.
+  function copyText(text) {
+    if (navigator.clipboard && window.isSecureContext) {
+      return navigator.clipboard.writeText(text);
+    }
+    return new Promise(function (resolve, reject) {
+      const area = document.createElement("textarea");
+      area.value = text;
+      area.setAttribute("readonly", "");
+      area.style.position = "fixed";
+      area.style.top = "-1000px";
+      document.body.appendChild(area);
+      area.select();
+      try {
+        if (document.execCommand("copy")) resolve();
+        else reject(new Error("브라우저가 복사를 허용하지 않았습니다"));
+      } catch (error) {
+        reject(error);
+      } finally {
+        document.body.removeChild(area);
+      }
+    });
+  }
+
   document.addEventListener("click", function (event) {
     const opener = event.target.closest("[data-outlet]");
     if (opener) {
@@ -62,8 +87,8 @@
         phone.textContent = real;
         phone.dataset.revealed = "1";
         phone.title = "한 번 더 누르면 복사됩니다";
-      } else if (navigator.clipboard) {
-        navigator.clipboard.writeText(real).then(function () {
+      } else {
+        copyText(real).then(function () {
           const original = phone.textContent;
           phone.textContent = "복사됨";
           setTimeout(function () {
@@ -112,20 +137,26 @@
   // 팝업 안 '명단 전체 복사'
   document.addEventListener("click", function (event) {
     const button = event.target.closest("[data-copy-list]");
-    if (!button || !navigator.clipboard) return;
+    if (!button) return;
     const scope = document.getElementById(button.getAttribute("data-copy-list"));
     if (!scope) return;
     const lines = [];
     scope.querySelectorAll("[data-row]").forEach(function (row) {
       lines.push(row.getAttribute("data-row"));
     });
-    navigator.clipboard.writeText(lines.join("\n")).then(function () {
-      const label = button.textContent;
-      button.textContent = "복사됨 (" + lines.length + "명)";
-      setTimeout(function () {
-        button.textContent = label;
-      }, 1200);
-    });
+    const label = button.textContent;
+    copyText(lines.join("\n"))
+      .then(function () {
+        button.textContent = "복사됨 (" + lines.length + "명)";
+      })
+      .catch(function () {
+        button.textContent = "복사 실패 — 브라우저 설정을 확인하세요";
+      })
+      .then(function () {
+        setTimeout(function () {
+          button.textContent = label;
+        }, 1200);
+      });
   });
 
   // 검토 화면: 유형별 전체 선택/해제
