@@ -322,6 +322,51 @@ class TestDeskReporterByRank:
         assert offenders == [], offenders
 
 
+class TestMergedOutletColumn:
+    """매체명 칸이 세로 병합돼 팀원 행에도 반복되는 실제 레이아웃.
+
+    이 반복을 새 매체 행으로 오인하면 팀원 전원이 데스크(산업부장)로 등록된다.
+    실제 파일에서 144명이 그렇게 잘못 들어갔던 사고의 회귀 테스트.
+    """
+
+    @pytest.fixture(scope="class")
+    def result(self):
+        return detect_and_parse(FIXTURES / "sample_combined.docx")
+
+    def test_unlabeled_member_in_repeated_row_is_a_reporter(self, result):
+        for name in ("안별", "박순찬", "이동훈", "박소라"):
+            record = find(result.records, name)[0]
+            assert record.kind == REPORTER, name
+            assert record.role_slot is None, name
+
+    def test_desks_are_only_the_top_row(self, result):
+        chosun_desks = {r.name for r in result.records if r.outlet == "조선일보" and r.kind == DESK}
+        assert chosun_desks == {"전수용", "이길성"}
+
+    def test_repeated_row_members_keep_column_dept(self, result):
+        assert find(result.records, "김성민")[0].dept == "테크부"
+        assert find(result.records, "정한국")[0].dept == "산업부"
+
+    def test_gukjang_does_not_take_the_sanupbujang_slot(self, result):
+        """국장급은 산업부장 칸에 밀어 넣지 않는다. 보도국장은 편집국장 칸."""
+        record = find(result.records, "이재준")[0]
+        assert record.kind == DESK
+        assert record.role_slot == "편집국장"
+        assert find(result.records, "임진수")[0].role_slot == "산업부장"
+
+    def test_unknown_outlet_is_not_absorbed_into_previous_one(self, result):
+        """사전에 없는 매체(OBS·MTN 케이스)도 매체 행으로 인식해야 한다."""
+        desk = find(result.records, "정철호")[0]
+        assert desk.outlet == "가나방송"
+        assert desk.kind == DESK
+        assert desk.outlet_known is False
+        member = find(result.records, "유성훈")[0]
+        assert member.outlet == "가나방송"
+        assert member.kind == REPORTER
+        cbs = {r.name for r in result.records if r.outlet == "CBS"}
+        assert "정철호" not in cbs and "유성훈" not in cbs
+
+
 class TestSimilarOutletsStaySeparate:
     """이름이 비슷해도 다른 매체는 합치지 않는다."""
 

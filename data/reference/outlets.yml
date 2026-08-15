@@ -254,3 +254,11 @@ outlets:
     category: 방송
     order: 515
     aliases: [MBN머니, 매경TV]
+  - name: OBS
+    category: 방송
+    order: 516
+    aliases: [OBS경인TV, 오비에스]
+  - name: MTN
+    category: 방송
+    order: 517
+    aliases: [머니투데이방송, MTN머니투데이방송]

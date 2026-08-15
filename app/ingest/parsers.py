@@ -19,7 +19,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from xml.etree import ElementTree
 
-from .normalize import clean_text, is_empty, normalize_key, parse_people
+from .normalize import PHONE_RE, clean_text, is_empty, normalize_key, parse_people
 from .records import (
     DESK,
     REPORTER,
@@ -476,8 +476,18 @@ def parse_combined_docx(path: Path) -> ParseResult:
             if _CATEGORY_ROW_RE.match(first) and not any(cells[1:]):
                 continue  # `[종합지]` 구획 행
 
+            # 매체명 칸은 세로로 병합돼 있어 팀원 행에도 같은 이름이 반복된다.
+            # 같은 이름이 또 나오면 새 매체 행이 아니라 팀원 행이다.
+            # 이걸 구분하지 않으면 팀원 전원이 데스크(산업부장)로 잡힌다 — 실제로 났던 사고.
+            is_repeat = bool(first) and first == current_outlet
             outlet_match = reference.match_outlet(first) if first else None
-            if outlet_match and len(first) <= 12:
+            is_outlet_row = (
+                not is_repeat
+                and bool(first)
+                and len(first) <= 12
+                and (outlet_match is not None or _looks_like_outlet_row(first, cells[1:]))
+            )
+            if is_outlet_row:
                 current_outlet = first
                 dept_slots = []
                 for col_idx, cell_text in enumerate(cells[1:], start=1):
@@ -488,14 +498,22 @@ def parse_combined_docx(path: Path) -> ParseResult:
                     for person in parse_people(body):
                         # 맨 윗줄이라도 차장·기자면 출입기자다.
                         kind = classify_kind(person.role_label, fallback=DESK)
+                        rank, _ = reference.rank_of(person.role_label)
+                        # 이 문서는 산업 출입처 데스크 명단이므로,
+                        # 부서 표기가 없는 칸(`이관범 부장 …`)은 산업부장으로 본다.
+                        # 단 국장급까지 밀어 넣으면 `보도국장`이 산업부장 칸을
+                        # 차지하므로, 부장급(또는 직함 없음)일 때만 칸을 준다.
+                        slot_hint = (
+                            "산업부장"
+                            if kind == DESK and (not person.role_label or rank == "부장")
+                            else None
+                        )
                         result.records.append(
                             _make_record(
                                 person,
                                 current_outlet,
                                 kind,
-                                # 이 문서는 산업 출입처 데스크 명단이므로,
-                                # 부서 표기가 없는 칸(`이관범 부장 …`)은 산업부장으로 본다.
-                                slot_hint="산업부장",
+                                slot_hint=slot_hint,
                                 dept_hint=reference.dept_of(dept) or dept,
                                 sheet=sheet,
                                 ref=f"{sheet}!R{row_idx}C{col_idx + 1}",
@@ -507,7 +525,9 @@ def parse_combined_docx(path: Path) -> ParseResult:
                 continue
 
             # 팀원 행. 비어 있지 않은 칸을 순서대로 직전 매체 행의 부서에 대응시킨다.
-            filled = [(idx, text) for idx, text in enumerate(cells) if not is_empty(text)]
+            # 세로 병합으로 반복된 매체명 칸은 팀원이 아니므로 떼어 낸다.
+            body_cells = cells[1:] if is_repeat else cells
+            filled = [(idx, text) for idx, text in enumerate(body_cells) if not is_empty(text)]
             if not filled:
                 continue
             if len(filled) > len(dept_slots) and dept_slots:
@@ -537,6 +557,24 @@ def parse_combined_docx(path: Path) -> ParseResult:
                     )
 
     return result
+
+
+_RANK_TOKEN_RE = re.compile(r"부장|국장|본부장|실장|이사|대표")
+
+
+def _looks_like_outlet_row(first: str, rest: list[str]) -> bool:
+    """사전에 없는 매체라도 매체 행처럼 생겼으면 새 매체 행으로 본다.
+
+    OBS·MTN 처럼 사전에 빠진 매체를 매체로 인식하지 못하면 그 인원 전체가
+    직전 매체의 팀원으로 흡수된다 — 실제로 났던 사고. 매체명 칸은 짧고 숫자가
+    없으며, 옆 데스크 칸에는 전화번호와 간부 직급이 함께 적혀 있다는 점으로 가른다.
+    """
+    if any(ch.isdigit() for ch in first):
+        return False
+    return any(
+        not is_empty(cell) and PHONE_RE.search(cell) and _RANK_TOKEN_RE.search(cell)
+        for cell in rest
+    )
 
 
 def _dedupe_adjacent(cells: list[str]) -> list[str]:
