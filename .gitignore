@@ -38,3 +38,4 @@ node_modules/
 # 기타
 .DS_Store
 *.log
+.env.test
