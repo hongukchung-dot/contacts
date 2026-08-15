@@ -112,7 +112,12 @@ sudo ufw allow 8080/tcp  # 막혀 있다면 열기
 Tailscale 없이 부서원들이 접속하려면 서버를 인터넷에 열어야 합니다.
 실명·전화번호가 든 자료이므로 **반드시 HTTPS(도메인)** 로 열고, 아래 순서를 지키세요.
 
-1. **도메인 준비** — 아무 등록업체에서나 구매하고, A 레코드를 서버 공인 IP로 지정
+1. **도메인 준비** — 두 가지 중 하나:
+   - **무료 (DuckDNS)**: [duckdns.org](https://www.duckdns.org) 에 구글 계정으로 로그인 →
+     원하는 이름을 등록(예: `newsmonitor-contacts`) → `current ip` 칸에 서버 공인 IP를
+     넣고 update. 이러면 `newsmonitor-contacts.duckdns.org` 가 서버를 가리킵니다.
+     서버 IP가 고정이면 이걸로 끝 — 갱신 스크립트도 필요 없습니다.
+   - **구매**: 아무 등록업체에서나 사고, A 레코드를 서버 공인 IP로 지정
 2. **80·443 포트 비우기** — Tailscale 이 점유하고 있다면 해제:
    ```bash
    sudo ss -lptn 'sport = :443'        # 무엇이 잡고 있는지 확인
@@ -121,7 +126,7 @@ Tailscale 없이 부서원들이 접속하려면 서버를 인터넷에 열어�
 3. **클라우드 보안 그룹**에서 TCP 80, 443 인바운드 허용 (8080 은 다시 닫아도 됩니다)
 4. **.env 수정** 후 재배포:
    ```bash
-   SITE_ADDRESS=contacts.example.com   # 도메인 — 인증서 자동 발급
+   SITE_ADDRESS=newsmonitor-contacts.duckdns.org   # 등록한 이름 — 인증서 자동 발급
    HTTP_PORT=80
    HTTPS_PORT=443
    REQUIRE_TOTP=true                   # 2단계 인증 (강력 권장)
