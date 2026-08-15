@@ -106,8 +106,13 @@ class TestReporterList:
     def test_as_of(self, result):
         assert result.as_of == date(2026, 6, 9)
 
-    def test_all_records_are_reporters(self, result):
-        assert {r.kind for r in result.records} == {REPORTER}
+    def test_rank_decides_kind_even_in_reporter_list(self, result):
+        """출입기자 명단이라도 부장급 이상은 데스크다 (작은 매체는 이 파일에만 나온다)."""
+        assert find(result.records, "이길성")[0].kind == DESK      # 산업부장
+        assert find(result.records, "전수용")[0].kind == DESK      # 테크부장
+        assert find(result.records, "정한국")[0].kind == REPORTER  # 차장
+        assert find(result.records, "안별")[0].kind == REPORTER    # 직급 없음
+        assert find(result.records, "권지혜")[0].kind == REPORTER  # 팀장(차장급)
 
     def test_outlet_fill_down_across_rows(self, result):
         assert find(result.records, "정한국")[0].outlet == "조선일보"

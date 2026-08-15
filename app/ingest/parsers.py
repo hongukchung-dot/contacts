@@ -422,11 +422,14 @@ def _read_reporter_sheet(sheet, result: ParseResult) -> None:
             result.unparsed.append(f"[{sheet.title}] {row_idx}행: {blob!r}")
             continue
         for person in people:
+            # 출입기자 명단이라도 대표·편집국장·부장급이 섞여 있다 (특히 작은 매체).
+            # 직급이 부장급 이상이면 데스크로 분류한다.
+            kind = classify_kind(person.role_label, fallback=REPORTER)
             result.records.append(
                 _make_record(
                     person,
                     current_outlet,
-                    REPORTER,
+                    kind,
                     sheet=sheet.title,
                     ref=f"{sheet.title}!R{row_idx}",
                 )
