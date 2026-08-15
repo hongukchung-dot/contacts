@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}{{ person.name }} · 언론사 주소록{% endblock %}
+{% block content %}
+
+<div class="panel">
+  <h2>{{ person.name }}</h2>
+  <div class="body">
+    <div class="statline" style="margin-bottom:12px;">
+      <span>현재 번호 <b>{% if person.phone %}<span class="phone" data-phone="{{ format_phone(person.phone) }}">{{ mask_phone(person.phone) }}</span>{% else %}—{% endif %}</b></span>
+    </div>
+
+    <h4>현재 자리</h4>
+    <div class="tablewrap"><table>
+      <thead><tr><th style="width:120px;">매체</th><th style="width:70px;">구분</th><th>직책</th><th style="width:80px;">부서</th><th style="width:100px;">시작</th></tr></thead>
+      <tbody>
+      {% for a in current %}
+        <tr>
+          <td>{{ a.outlet.name }}</td>
+          <td>{{ '데스크' if a.kind == 'desk' else '출입기자' }}</td>
+          <td>{{ a.role_label or a.role_slot or '-' }}</td>
+          <td>{{ a.dept or '-' }}</td>
+          <td class="muted">{{ a.valid_from }}</td>
+        </tr>
+      {% else %}
+        <tr><td colspan="5" class="muted">현재 등록된 자리가 없습니다.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table></div>
+
+    {% if past %}
+    <h4 style="margin-top:18px;">지난 이력</h4>
+    <div class="tablewrap"><table>
+      <thead><tr><th style="width:120px;">매체</th><th style="width:70px;">구분</th><th>직책</th><th style="width:80px;">부서</th><th style="width:180px;">기간</th></tr></thead>
+      <tbody>
+      {% for a in past %}
+        <tr class="muted">
+          <td>{{ a.outlet.name }}</td>
+          <td>{{ '데스크' if a.kind == 'desk' else '출입기자' }}</td>
+          <td>{{ a.role_label or a.role_slot or '-' }}</td>
+          <td>{{ a.dept or '-' }}</td>
+          <td>{{ a.valid_from }} ~ {{ a.valid_to }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table></div>
+    {% endif %}
+
+    {% if phones|length > 1 %}
+    <h4 style="margin-top:18px;">번호 변경 이력</h4>
+    <div class="tablewrap"><table>
+      <thead><tr><th style="width:150px;">번호</th><th style="width:180px;">기간</th></tr></thead>
+      <tbody>
+      {% for item in phones %}
+        <tr><td>{{ format_phone(item.phone) }}</td><td class="muted">{{ item.valid_from }} ~ {{ item.valid_to or '현재' }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table></div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

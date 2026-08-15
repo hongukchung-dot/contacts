@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% from "_phone.html" import phone %}
+{% block title %}주요 간부 현황 · 언론사 주소록{% endblock %}
+{% block content %}
+
+<div class="panel">
+  <h2>
+    주요 간부 현황
+    <span class="spacer"></span>
+    <a class="btn small" href="/export.xlsx">엑셀 내려받기</a>
+  </h2>
+  <div class="body" style="padding:11px 14px;">
+    <div class="statline" style="margin-bottom:10px;">
+      <span>매체 <b>{{ stats.outlets }}</b></span>
+      <span>데스크 <b>{{ stats.desks }}</b></span>
+      <span>출입기자 <b>{{ stats.reporters }}</b></span>
+      <span>등록 인원 <b>{{ stats.people }}</b></span>
+      {% if stats.last_file %}
+        <span>최근 반영 <b>{{ stats.last_file.as_of }}</b> ({{ stats.last_file.filename }})</span>
+      {% endif %}
+    </div>
+    <div class="chips">
+      <a class="chip {{ 'active' if not selected_category }}" href="/">전체</a>
+      {% for name in categories %}
+        <a class="chip {{ 'active' if selected_category == name }}" href="/?category={{ name }}">{{ name }}</a>
+      {% endfor %}
+    </div>
+    <p class="muted" style="margin:9px 0 0;">
+      매체명을 누르면 출입기자 명단이 열립니다 · 번호를 누르면 표시되고, 한 번 더 누르면 복사됩니다 ·
+      최근 {{ highlight_days }}일 내 변경분은 <span style="background:var(--highlight);padding:0 4px;border-radius:3px;">음영</span> 표시
+    </p>
+  </div>
+</div>
+
+{% if not groups %}
+  <div class="panel"><div class="body">
+    <div class="notice info">
+      아직 등록된 자료가 없습니다.
+      {% if user.can_edit %}<a href="/upload">주소록 파일을 업로드</a>하면 표가 채워집니다.{% endif %}
+    </div>
+  </div></div>
+{% else %}
+<div class="panel">
+  <div class="tablewrap">
+    <table>
+      <thead>
+        <tr>
+          <th style="min-width:108px;">매체명</th>
+          {% for slot in slots %}<th>{{ slot }}</th>{% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for category, rows in groups %}
+          <tr class="category-head"><th colspan="{{ slots|length + 1 }}">{{ category }} ({{ rows|length }})</th></tr>
+          {% for row in rows %}
+          <tr>
+            <td class="outlet">
+              <button type="button" data-outlet="{{ row.id }}">{{ row.name }}</button>
+              {% if row.reporter_count %}<span class="count">출입 {{ row.reporter_count }}명</span>{% endif %}
+            </td>
+            {% for slot in slots %}
+            <td>
+              {% for entry in row.cells.get(slot, []) %}
+                <span class="person {{ 'recent' if entry.is_recent }}">
+                  <span class="nm">{{ entry.name }}</span>
+                  {% if entry.role_text and entry.role_text != slot %}<span class="rl">({{ entry.role_text }})</span>{% endif %}
+                  {% if entry.concurrent %}<span class="rl">겸</span>{% endif %}
+                  <br>{{ phone(entry, mask) }}
+                </span>
+              {% endfor %}
+            </td>
+            {% endfor %}
+          </tr>
+          {% endfor %}
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+{% endblock %}

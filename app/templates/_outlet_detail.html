@@ -1,0 +1,58 @@
+{% from "_phone.html" import phone %}
+<div class="modal">
+  <div class="head">
+    <h3>{{ outlet.name }}</h3>
+    <span class="tag">{{ outlet.category }}</span>
+    <span class="muted">데스크 {{ desks|length }}명 · 출입기자 {{ reporter_total }}명</span>
+    <span class="spacer" style="flex:1"></span>
+    <button class="btn small" data-copy-list="outlet-list-{{ outlet.id }}">명단 전체 복사</button>
+    <button class="close" data-close aria-label="닫기">&times;</button>
+  </div>
+  <div class="body" id="outlet-list-{{ outlet.id }}">
+    {% if desks %}
+    <div class="deptblock">
+      <h4>데스크</h4>
+      <div class="tablewrap"><table>
+        <thead><tr><th style="width:90px;">이름</th><th>직책</th><th style="width:70px;">부서</th><th style="width:130px;">연락처</th></tr></thead>
+        <tbody>
+        {% for entry in desks %}
+          <tr data-row="{{ entry.name }}	{{ entry.role_text or '' }}	{{ entry.phone_display }}">
+            <td class="{{ 'person recent' if entry.is_recent }}"><a href="/person/{{ entry.person_id }}">{{ entry.name }}</a></td>
+            <td>{{ entry.role_text or '-' }}{% if entry.concurrent %} <span class="tag">겸직</span>{% endif %}</td>
+            <td>{{ entry.dept or '-' }}</td>
+            <td>{{ phone(entry, mask) }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table></div>
+    </div>
+    {% endif %}
+
+    {% if reporters_by_dept %}
+      {% for dept, entries in reporters_by_dept.items() %}
+      <div class="deptblock">
+        <h4>{{ dept }} 출입기자 ({{ entries|length }}명)</h4>
+        <div class="tablewrap"><table>
+          <thead><tr><th style="width:90px;">이름</th><th>직급</th><th style="width:90px;">담당</th><th style="width:130px;">연락처</th></tr></thead>
+          <tbody>
+          {% for entry in entries %}
+            <tr data-row="{{ entry.name }}	{{ entry.role_text or entry.rank }}	{{ entry.phone_display }}">
+              <td class="{{ 'person recent' if entry.is_recent }}"><a href="/person/{{ entry.person_id }}">{{ entry.name }}</a></td>
+              <td>{{ entry.role_text or entry.rank }}</td>
+              <td>{{ entry.note or '-' }}</td>
+              <td>{{ phone(entry, mask) }}</td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table></div>
+      </div>
+      {% endfor %}
+    {% else %}
+      <p class="muted">등록된 출입기자가 없습니다.</p>
+    {% endif %}
+
+    {% if source %}
+      <p class="muted">최근 반영 파일: {{ source.filename }} (기준일 {{ source.as_of }})</p>
+    {% endif %}
+  </div>
+</div>

@@ -480,6 +480,11 @@ def apply_change_set(session: Session, change_set: ChangeSet, *, applied_by_id: 
     as_of = change_set.source_file.as_of
     counts = {NEW: 0, UPDATE: 0, REMOVE: 0, CONFLICT: 0, "skipped": 0}
 
+    # 반영 직전에 판단해야 정확하다: 지금 DB가 비어 있으면 이건 초기 적재다.
+    change_set.is_initial = (
+        session.scalar(select(Assignment.id).where(Assignment.valid_to.is_(None)).limit(1)) is None
+    )
+
     for change in change_set.changes:
         if change.applied:
             continue

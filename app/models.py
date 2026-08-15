@@ -226,6 +226,8 @@ class ChangeSet(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     source_file_id: Mapped[int] = mapped_column(ForeignKey("source_file.id", ondelete="CASCADE"))
     status: Mapped[str] = mapped_column(String(15), default=PENDING, index=True)
+    # 비어 있던 DB를 처음 채운 적재인가. 초기 적재는 전부 '신규'이므로 변동 음영을 넣지 않는다.
+    is_initial: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     applied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     applied_by_id: Mapped[int | None] = mapped_column(

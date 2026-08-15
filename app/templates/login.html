@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>로그인 · 언론사 주소록</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<main style="max-width:380px;margin:12vh auto;">
+  <div class="panel">
+    <h2>언론사 주소록 로그인</h2>
+    <div class="body">
+      {% if error %}<div class="notice error">{{ error }}</div>{% endif %}
+      <form method="post" action="/login">
+        <input type="hidden" name="next" value="{{ next }}">
+        <label class="muted" for="username">아이디</label>
+        <input id="username" name="username" required autofocus autocomplete="username"
+               style="width:100%;padding:8px;margin:4px 0 12px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);">
+        <label class="muted" for="password">비밀번호</label>
+        <input id="password" name="password" type="password" required autocomplete="current-password"
+               style="width:100%;padding:8px;margin:4px 0 16px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);">
+        <button class="btn primary" type="submit" style="width:100%;">로그인</button>
+      </form>
+      <p class="muted" style="margin-top:14px;">
+        개인정보(실명·휴대전화번호)가 포함된 자료입니다. 조회 기록이 남습니다.
+      </p>
+    </div>
+  </div>
+</main>
+</body>
+</html>

@@ -141,3 +141,21 @@ class TestParseCell:
     def test_source_text_is_preserved(self):
         people = parse_people("강 경 희 010-7344-0000")
         assert "강 경 희" in people[0].source_text
+
+
+class TestRoleDisplay:
+    def test_generic_role_is_expanded_with_dept(self):
+        from app.ingest.normalize import role_display
+
+        assert role_display("부장", "산업부장", "테크부") == "테크부장"
+        assert role_display("부장", "산업부장", "산업부") == "산업부장"
+
+    def test_specific_role_is_kept(self):
+        from app.ingest.normalize import role_display
+
+        assert role_display("산업1부장", "산업부장", "산업부") == "산업1부장"
+
+    def test_falls_back_to_slot(self):
+        from app.ingest.normalize import role_display
+
+        assert role_display(None, "편집국장", None) == "편집국장"

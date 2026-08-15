@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+{% block title %}변경 검토 · 언론사 주소록{% endblock %}
+{% block content %}
+
+{% if request.query_params.get('done') %}
+  <div class="notice ok">반영이 완료되었습니다. <a href="/">현황 보기 →</a></div>
+{% endif %}
+
+<div class="panel">
+  <h2>변경 내역 검토 — {{ source.filename }}</h2>
+  <div class="body">
+    <div class="statline" style="margin-bottom:10px;">
+      <span>기준일 <b>{{ source.as_of }}</b></span>
+      <span>유형 <b>{{ source.file_kind }}</b></span>
+      <span>읽은 인원 <b>{{ source.record_count }}</b></span>
+      <span>변경 <b>{{ change_set.changes|length }}</b>건</span>
+      <span>자동 승인 <b>{{ auto_count }}</b>건</span>
+      <span>확인 필요 <b>{{ pending_count }}</b>건</span>
+    </div>
+
+    {% if source.unparsed %}
+      <div class="notice warn">
+        해석하지 못한 칸이 {{ source.unparsed|length }}개 있습니다. 원본 표기를 확인해 주세요.
+        <ul style="margin:6px 0 0;">{% for item in source.unparsed[:10] %}<li><code>{{ item }}</code></li>{% endfor %}</ul>
+      </div>
+    {% endif %}
+    {% if source.parse_warnings %}
+      <div class="notice warn">
+        {% for item in source.parse_warnings[:10] %}<div>{{ item }}</div>{% endfor %}
+      </div>
+    {% endif %}
+    {% if change_set.status == 'applied' %}
+      <div class="notice ok">이 검토 건은 이미 반영되었습니다 ({{ change_set.applied_at.strftime('%Y-%m-%d %H:%M') }}).</div>
+    {% endif %}
+  </div>
+</div>
+
+{% if change_set.status != 'applied' %}
+<form method="post" action="/review/{{ change_set.id }}/apply">
+{% endif %}
+
+{% for kind, label, hint in [
+    ('conflict', '확인 필요 — 오타 의심', '번호가 1~2자리만 다릅니다. 원본이 맞는지 확인한 뒤 체크하세요.'),
+    ('remove', '삭제 — 이번 파일에서 빠짐', '퇴사·인사이동일 수도, 파일 누락일 수도 있습니다. 확인 후 체크하세요.'),
+    ('update', '변경', '기본 승인 상태입니다.'),
+    ('new', '신규 등록', '기본 승인 상태입니다.')] %}
+  {% set items = buckets.get(kind, []) %}
+  {% if items %}
+  <div class="panel">
+    <h2>
+      <span class="tag {{ kind }}">{{ label }}</span>
+      <span class="muted">{{ items|length }}건 — {{ hint }}</span>
+      <span class="spacer" style="flex:1"></span>
+      {% if change_set.status != 'applied' %}
+      <label class="muted"><input type="checkbox" data-toggle-group="group-{{ kind }}"
+        {{ 'checked' if kind in ('update', 'new') }}> 전체 선택</label>
+      {% endif %}
+    </h2>
+    <div class="tablewrap" id="group-{{ kind }}">
+      <table>
+        <thead>
+          <tr>
+            <th style="width:44px;">반영</th>
+            <th style="width:110px;">매체</th>
+            <th style="width:90px;">이름</th>
+            <th style="width:70px;">항목</th>
+            <th>이전</th>
+            <th>이후</th>
+            <th style="width:230px;">사유</th>
+          </tr>
+        </thead>
+        <tbody>
+        {% for change in items %}
+          <tr>
+            <td>
+              {% if change_set.status == 'applied' %}
+                {{ '✓' if change.applied else '—' }}
+              {% else %}
+                <input type="checkbox" name="approve" value="{{ change.id }}"
+                       {{ 'checked' if change.decision == 'approved' }}>
+              {% endif %}
+            </td>
+            <td>{{ change.outlet_name }}</td>
+            <td>{{ change.person_name }}</td>
+            <td>{{ {'phone':'번호','role':'직책','assignment':'자리'}.get(change.field, change.field) }}</td>
+            <td class="muted">{{ change.old_value or '—' }}</td>
+            <td>{{ change.new_value or '—' }}</td>
+            <td class="muted">{{ change.reason or '' }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
+{% endfor %}
+
+{% if not change_set.changes %}
+  <div class="panel"><div class="body"><div class="notice ok">변경된 내용이 없습니다. 이미 최신 상태입니다.</div></div></div>
+{% endif %}
+
+{% if change_set.status != 'applied' %}
+  <div class="panel"><div class="body" style="display:flex;gap:8px;align-items:center;">
+    <button class="btn primary" type="submit">체크한 항목 반영</button>
+    <span class="muted">체크하지 않은 항목은 반려되며, 원본 파일과 파싱 결과는 그대로 보관됩니다.</span>
+  </div></div>
+</form>
+<form method="post" action="/review/{{ change_set.id }}/discard" style="margin-bottom:16px;">
+  <button class="btn danger small" type="submit" onclick="return confirm('이 업로드 건을 통째로 버릴까요?')">전체 반려</button>
+</form>
+{% endif %}
+{% endblock %}

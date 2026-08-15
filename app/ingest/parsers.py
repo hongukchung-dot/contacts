@@ -47,6 +47,9 @@ def _make_record(
     outlet, category, _order, known = reference.outlet_or_placeholder(outlet_raw)
 
     role_slot = reference.slot_from_label(person.role_label)
+    if person.concurrent and slot_hint:
+        # `편집국장` 열에 `(兼 경제부장)` 이라 적힌 경우 본직은 열 쪽이다.
+        role_slot = slot_hint
     rank, rank_order = reference.rank_of(person.role_label)
     dept = reference.dept_of(person.role_label) or dept_hint
     if role_slot is None and dept_hint:

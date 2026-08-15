@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}파일 업로드 · 언론사 주소록{% endblock %}
+{% block content %}
+
+<div class="panel">
+  <h2>주소록 파일 업로드</h2>
+  <div class="body">
+    {% if error %}<div class="notice error">{{ error }}</div>{% endif %}
+    <p class="muted" style="margin-top:0;">
+      데스크 현황(xlsx) · 출입기자 현황(xlsx) · 데스크/출입기자 통합(docx) 을 모두 받습니다.
+      파일 형식은 자동으로 판별합니다. <b>올리는 즉시 반영되지 않고</b>, 다음 화면에서 변경 내역을 확인한 뒤 반영합니다.
+    </p>
+    <form method="post" action="/upload" enctype="multipart/form-data">
+      <p>
+        <input type="file" name="file" accept=".xlsx,.xlsm,.docx" required>
+      </p>
+      <p>
+        <label class="muted" for="as_of">기준일 (비워 두면 파일명·본문에서 자동 인식)</label><br>
+        <input id="as_of" type="date" name="as_of"
+               style="padding:6px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink);">
+      </p>
+      <button class="btn primary" type="submit">업로드하고 변경 내역 확인</button>
+    </form>
+  </div>
+</div>
+
+{% if pending %}
+<div class="panel">
+  <h2>검토 대기 중</h2>
+  <div class="body">
+    <div class="tablewrap"><table>
+      <thead><tr><th>파일</th><th style="width:100px;">기준일</th><th style="width:80px;">변경</th><th style="width:110px;">올린 시각</th><th style="width:80px;"></th></tr></thead>
+      <tbody>
+      {% for cs in pending %}
+        <tr>
+          <td>{{ cs.source_file.filename }}</td>
+          <td>{{ cs.source_file.as_of }}</td>
+          <td>{{ cs.changes|length }}건</td>
+          <td class="muted">{{ cs.created_at.strftime('%m-%d %H:%M') }}</td>
+          <td><a class="btn small" href="/review/{{ cs.id }}">검토</a></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table></div>
+  </div>
+</div>
+{% endif %}
+{% endblock %}

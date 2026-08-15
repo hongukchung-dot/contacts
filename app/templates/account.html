@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}내 계정 · 언론사 주소록{% endblock %}
+{% block content %}
+<div class="panel" style="max-width:460px;">
+  <h2>비밀번호 변경</h2>
+  <div class="body">
+    {% if message %}<div class="notice ok">{{ message }}</div>{% endif %}
+    {% if error %}<div class="notice error">{{ error }}</div>{% endif %}
+    <p class="muted" style="margin-top:0;">{{ user.username }} · {{ ROLES.get(user.role, user.role) }}</p>
+    <form method="post" action="/account">
+      {% for field, label, auto in [('current_password','현재 비밀번호','current-password'),
+                                    ('new_password','새 비밀번호 (10자 이상)','new-password'),
+                                    ('confirm_password','새 비밀번호 확인','new-password')] %}
+        <label class="muted" for="{{ field }}">{{ label }}</label><br>
+        <input id="{{ field }}" name="{{ field }}" type="password" required autocomplete="{{ auto }}"
+               style="width:100%;padding:8px;margin:4px 0 12px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);"><br>
+      {% endfor %}
+      <button class="btn primary" type="submit">변경</button>
+    </form>
+  </div>
+</div>
+{% endblock %}

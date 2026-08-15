@@ -259,3 +259,16 @@ def _build_person(blob: str, raw_phone: str | None, source_text: str) -> ParsedP
         source_text=source_text,
         warnings=warnings,
     )
+
+
+# 화면 표기용 ─────────────────────────────────────────────────────────────────
+GENERIC_ROLES = {"부장", "차장", "팀장", "기자", "국장", "부국장", "에디터", "위원", "특파원"}
+
+
+def role_display(role_label: str | None, role_slot: str | None, dept: str | None) -> str:
+    """`부장` + 부서 `산업부` → `산업부장` 처럼 읽기 좋은 직책 문자열을 만든다."""
+    if role_label and role_label not in GENERIC_ROLES:
+        return role_label
+    if role_label == "부장" and dept and dept.endswith("부"):
+        return dept[:-1] + role_label
+    return role_label or role_slot or ""

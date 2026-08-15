@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}변경 이력 · 언론사 주소록{% endblock %}
+{% block content %}
+
+<div class="panel">
+  <h2>반영된 파일</h2>
+  <div class="tablewrap"><table>
+    <thead><tr><th>파일</th><th style="width:100px;">기준일</th><th style="width:80px;">상태</th><th style="width:80px;">변경</th><th style="width:130px;">반영 시각</th></tr></thead>
+    <tbody>
+    {% for cs in change_sets %}
+      <tr>
+        <td><a href="/review/{{ cs.id }}">{{ cs.source_file.filename }}</a></td>
+        <td>{{ cs.source_file.as_of }}</td>
+        <td>{{ {'pending':'검토 대기','applied':'반영됨','rejected':'반려'}.get(cs.status, cs.status) }}</td>
+        <td>{{ cs.changes|length }}건</td>
+        <td class="muted">{{ cs.applied_at.strftime('%Y-%m-%d %H:%M') if cs.applied_at else '—' }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+</div>
+
+<div class="panel">
+  <h2>최근 변경 내역</h2>
+  <div class="tablewrap"><table>
+    <thead><tr><th style="width:70px;">유형</th><th style="width:110px;">매체</th><th style="width:90px;">이름</th><th style="width:60px;">항목</th><th>이전</th><th>이후</th><th style="width:180px;">근거 파일</th></tr></thead>
+    <tbody>
+    {% for change in changes %}
+      <tr>
+        <td><span class="tag {{ change.change_type }}">{{ CHANGE_TYPE_LABEL.get(change.change_type, change.change_type) }}</span></td>
+        <td>{{ change.outlet_name }}</td>
+        <td>{% if change.person_id %}<a href="/person/{{ change.person_id }}">{{ change.person_name }}</a>{% else %}{{ change.person_name }}{% endif %}</td>
+        <td>{{ {'phone':'번호','role':'직책','assignment':'자리'}.get(change.field, change.field) }}</td>
+        <td class="muted">{{ change.old_value or '—' }}</td>
+        <td>{{ change.new_value or '—' }}</td>
+        <td class="muted">{{ change.change_set.source_file.as_of }} · {{ change.change_set.source_file.filename }}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="7" class="muted">아직 반영된 변경이 없습니다.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+</div>
+{% endblock %}

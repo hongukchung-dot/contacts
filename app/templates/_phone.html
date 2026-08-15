@@ -1,0 +1,5 @@
+{%- macro phone(entry, mask) -%}
+  {%- if entry.phone -%}
+    <span class="phone" data-phone="{{ entry.phone_display }}">{{ entry.phone_masked if mask else entry.phone_display }}</span>
+  {%- else -%}<span class="muted">—</span>{%- endif -%}
+{%- endmacro -%}

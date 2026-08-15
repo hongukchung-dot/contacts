@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% from "_phone.html" import phone %}
+{% block title %}검색 · 언론사 주소록{% endblock %}
+{% block content %}
+
+<div class="panel">
+  <h2>검색 결과{% if q %} — “{{ q }}”{% endif %}</h2>
+  <div class="body">
+    {% if result.interpreted %}
+      <div class="notice info">해석: <b>{{ result.interpreted }}</b></div>
+    {% endif %}
+    {% if result.note %}
+      <div class="notice warn">{{ result.note }}</div>
+    {% endif %}
+
+    {% if result.answer %}
+      {% set hit = result.answer %}
+      <div class="panel" style="margin-bottom:14px;">
+        <div class="body">
+          <div style="font-size:20px;font-weight:700;margin-bottom:4px;">
+            {{ hit.person_name }}
+            <span class="muted" style="font-size:13px;font-weight:400;">{{ hit.role_text }}</span>
+          </div>
+          <div class="muted" style="margin-bottom:8px;">
+            <button type="button" class="btn small" data-outlet="{{ hit.outlet_id }}">{{ hit.outlet_name }}</button>
+            {% if hit.dept %}· {{ hit.dept }}{% endif %}
+          </div>
+          {% if hit.phone %}
+            <div><span class="phone" data-phone="{{ format_phone(hit.phone) }}" style="font-size:17px;">{{ mask_phone(hit.phone) if mask else format_phone(hit.phone) }}</span></div>
+          {% endif %}
+          <a class="muted" href="/person/{{ hit.person_id }}">이력 보기 →</a>
+        </div>
+      </div>
+    {% endif %}
+
+    {% if result.hits %}
+      <div class="tablewrap"><table>
+        <thead><tr><th style="width:110px;">매체</th><th style="width:90px;">이름</th><th>직책</th><th style="width:80px;">부서</th><th style="width:70px;">구분</th><th style="width:135px;">연락처</th></tr></thead>
+        <tbody>
+        {% for hit in result.hits %}
+          <tr>
+            <td><button type="button" class="btn small" data-outlet="{{ hit.outlet_id }}">{{ hit.outlet_name }}</button></td>
+            <td><a href="/person/{{ hit.person_id }}">{{ hit.person_name }}</a></td>
+            <td>{{ hit.role_text or '-' }}</td>
+            <td>{{ hit.dept or '-' }}</td>
+            <td>{{ '데스크' if hit.kind == 'desk' else '출입기자' }}</td>
+            <td>{% if hit.phone %}<span class="phone" data-phone="{{ format_phone(hit.phone) }}">{{ mask_phone(hit.phone) if mask else format_phone(hit.phone) }}</span>{% else %}<span class="muted">—</span>{% endif %}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table></div>
+    {% elif q and not result.note %}
+      <p class="muted">결과가 없습니다.</p>
+    {% elif not q %}
+      <p class="muted">
+        이렇게 물어보세요 —
+        <a href="/search?q=매경 산업부장이 누구지?">매경 산업부장이 누구지?</a> ·
+        <a href="/search?q=조선일보">조선일보</a> ·
+        <a href="/search?q=산업부장">산업부장</a>
+      </p>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

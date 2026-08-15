@@ -206,3 +206,12 @@ def test_docx_desk_maps_to_matrix_slot():
     result = detect_and_parse(FIXTURES / "sample_combined.docx")
     for name in ("전수용", "이길성", "김현수", "이관범", "정욱", "고재만"):
         assert find(result.records, name)[0].role_slot == "산업부장", name
+
+
+def test_concurrent_role_keeps_column_slot():
+    """`편집국장` 열의 `(兼 경제부장)` 은 편집국장 자리로 둔다 (겸직은 라벨로 남김)."""
+    result = detect_and_parse(FIXTURES / "sample_desk_matrix.xlsx")
+    record = find(result.records, "이규성")[0]
+    assert record.role_slot == "편집국장"
+    assert record.role_label == "경제부장"
+    assert record.concurrent is True

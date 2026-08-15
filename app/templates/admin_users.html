@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block title %}계정 관리 · 언론사 주소록{% endblock %}
+{% block content %}
+
+{% if created %}
+  <div class="notice ok">
+    계정 비밀번호가 발급되었습니다 — <code style="font-size:14px;">{{ created }}</code>
+    <br><span class="muted">이 화면을 벗어나면 다시 볼 수 없습니다. 당사자에게 안전하게 전달하고 첫 로그인 후 변경하도록 안내하세요.</span>
+  </div>
+{% endif %}
+{% if error %}<div class="notice error">{{ error }}</div>{% endif %}
+
+<div class="panel">
+  <h2>계정 추가</h2>
+  <div class="body">
+    <form method="post" action="/admin/users" style="display:flex;gap:8px;flex-wrap:wrap;align-items:end;">
+      <div><label class="muted">아이디</label><br><input name="username" required
+        style="padding:7px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink);"></div>
+      <div><label class="muted">이름</label><br><input name="display_name" required
+        style="padding:7px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink);"></div>
+      <div><label class="muted">권한</label><br>
+        <select name="role" style="padding:7px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink);">
+          {% for code, label in ROLES.items() %}<option value="{{ code }}">{{ label }}</option>{% endfor %}
+        </select></div>
+      <button class="btn primary" type="submit">추가</button>
+    </form>
+  </div>
+</div>
+
+<div class="panel">
+  <h2>계정 목록</h2>
+  <div class="tablewrap"><table>
+    <thead><tr><th style="width:120px;">아이디</th><th style="width:110px;">이름</th><th style="width:110px;">권한</th><th style="width:70px;">상태</th><th style="width:140px;">최근 로그인</th><th style="width:190px;"></th></tr></thead>
+    <tbody>
+    {% for item in users %}
+      <tr>
+        <td>{{ item.username }}</td>
+        <td>{{ item.display_name }}</td>
+        <td>{{ ROLES.get(item.role, item.role) }}</td>
+        <td>{{ '사용' if item.active else '중지' }}</td>
+        <td class="muted">{{ item.last_login_at.strftime('%Y-%m-%d %H:%M') if item.last_login_at else '—' }}</td>
+        <td style="display:flex;gap:6px;">
+          <form method="post" action="/admin/users/{{ item.id }}/reset">
+            <button class="btn small" type="submit" onclick="return confirm('비밀번호를 새로 발급할까요?')">비밀번호 재발급</button>
+          </form>
+          {% if item.id != user.id %}
+          <form method="post" action="/admin/users/{{ item.id }}/toggle">
+            <button class="btn small" type="submit">{{ '중지' if item.active else '사용' }}</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+</div>
+
+<div class="panel">
+  <h2>접속·조회 기록 (최근 100건)</h2>
+  <div class="tablewrap"><table>
+    <thead><tr><th style="width:150px;">시각</th><th style="width:110px;">사용자</th><th style="width:120px;">동작</th><th>내용</th><th style="width:120px;">IP</th></tr></thead>
+    <tbody>
+    {% for log in logs %}
+      <tr>
+        <td class="muted">{{ log.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+        <td>{{ log.username }}</td>
+        <td>{{ log.action }}</td>
+        <td class="muted">{{ log.detail or '' }}</td>
+        <td class="muted">{{ log.ip or '' }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+</div>
+{% endblock %}

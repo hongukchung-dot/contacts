@@ -1,0 +1,262 @@
+"""화면에 뿌릴 데이터를 만드는 조회 계층."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from datetime import date, timedelta
+
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session, joinedload
+
+from ..config import get_settings
+from ..ingest.normalize import format_phone, role_display
+from ..ingest.reference import get_reference
+from ..models import (
+    APPLIED,
+    Assignment,
+    Change,
+    ChangeSet,
+    Outlet,
+    Person,
+    SourceFile,
+)
+
+CATEGORY_ORDER = ["종합지", "경제지", "방송", "통신사", "전문지", "영자지", "미분류"]
+
+
+@dataclass
+class Entry:
+    person_id: int
+    name: str
+    phone: str | None
+    role_label: str | None
+    role_slot: str | None
+    dept: str | None
+    rank: str
+    note: str | None
+    concurrent: bool
+    since: date
+    is_recent: bool
+
+    @property
+    def role_text(self) -> str:
+        return role_display(self.role_label, self.role_slot, self.dept)
+
+    @property
+    def phone_display(self) -> str:
+        return format_phone(self.phone)
+
+    @property
+    def phone_masked(self) -> str:
+        if not self.phone:
+            return "—"
+        formatted = format_phone(self.phone)
+        head, mid, tail = formatted.split("-")
+        return f"{head}-{'●' * len(mid)}-{tail}"
+
+
+@dataclass
+class OutletRow:
+    id: int
+    name: str
+    category: str
+    cells: dict[str, list[Entry]] = field(default_factory=dict)
+    reporter_count: int = 0
+    recent_change_count: int = 0
+
+
+def _recent_cutoff() -> date:
+    return date.today() - timedelta(days=get_settings().highlight_days)
+
+
+def _seed_file_ids(session: Session) -> frozenset[int]:
+    """비어 있던 DB를 처음 채운 적재의 파일 id 집합."""
+    rows = session.scalars(
+        select(ChangeSet.source_file_id).where(
+            ChangeSet.status == APPLIED, ChangeSet.is_initial.is_(True)
+        )
+    ).all()
+    return frozenset(rows)
+
+
+def matrix(session: Session, *, category: str | None = None) -> tuple[list[str], list[tuple[str, list[OutletRow]]]]:
+    """메인 화면용 (열 목록, [(분류, 매체행 목록)])."""
+    slots = get_reference().slot_codes
+    cutoff = _recent_cutoff()
+    seed_files = _seed_file_ids(session)
+
+    stmt = (
+        select(Assignment)
+        .options(joinedload(Assignment.person), joinedload(Assignment.outlet))
+        .join(Outlet)
+        .where(Assignment.valid_to.is_(None), Assignment.kind == "desk", Outlet.active.is_(True))
+        .order_by(Outlet.sort_order, Assignment.rank_order, Assignment.id)
+    )
+    if category:
+        stmt = stmt.where(Outlet.category == category)
+
+    rows: dict[int, OutletRow] = {}
+    for assignment in session.scalars(stmt).unique().all():
+        outlet = assignment.outlet
+        row = rows.get(outlet.id)
+        if row is None:
+            row = OutletRow(id=outlet.id, name=outlet.name, category=outlet.category)
+            rows[outlet.id] = row
+        slot = assignment.role_slot or "기타"
+        entry = _entry(assignment, cutoff, seed_files)
+        row.cells.setdefault(slot, []).append(entry)
+        if entry.is_recent:
+            row.recent_change_count += 1
+
+    _attach_reporter_counts(session, rows)
+
+    grouped: dict[str, list[OutletRow]] = {}
+    for row in rows.values():
+        grouped.setdefault(row.category, []).append(row)
+
+    ordered: list[tuple[str, list[OutletRow]]] = []
+    for name in CATEGORY_ORDER:
+        if name in grouped:
+            ordered.append((name, grouped.pop(name)))
+    for name in sorted(grouped):
+        ordered.append((name, grouped[name]))
+
+    return slots, ordered
+
+
+def _entry(assignment: Assignment, cutoff: date, seed_files: frozenset[int] = frozenset()) -> Entry:
+    # 초기 적재분은 '전부 신규'이므로 변동 음영을 넣지 않는다.
+    recent = assignment.valid_from >= cutoff and assignment.source_file_id not in seed_files
+    return Entry(
+        person_id=assignment.person_id,
+        name=assignment.person.name,
+        phone=assignment.person.phone,
+        role_label=assignment.role_label,
+        role_slot=assignment.role_slot,
+        dept=assignment.dept,
+        rank=assignment.rank,
+        note=assignment.note,
+        concurrent=assignment.concurrent,
+        since=assignment.valid_from,
+        is_recent=recent,
+    )
+
+
+def _attach_reporter_counts(session: Session, rows: dict[int, OutletRow]) -> None:
+    if not rows:
+        return
+    counts = session.execute(
+        select(Assignment.outlet_id, func.count(Assignment.id))
+        .where(
+            Assignment.valid_to.is_(None),
+            Assignment.kind == "reporter",
+            Assignment.outlet_id.in_(rows.keys()),
+        )
+        .group_by(Assignment.outlet_id)
+    ).all()
+    for outlet_id, count in counts:
+        rows[outlet_id].reporter_count = count
+
+
+def outlet_detail(session: Session, outlet_id: int) -> dict | None:
+    """매체명 클릭 시 뜨는 팝업 내용."""
+    outlet = session.get(Outlet, outlet_id)
+    if outlet is None:
+        return None
+
+    cutoff = _recent_cutoff()
+    seed_files = _seed_file_ids(session)
+    assignments = session.scalars(
+        select(Assignment)
+        .options(joinedload(Assignment.person))
+        .where(Assignment.outlet_id == outlet_id, Assignment.valid_to.is_(None))
+        .order_by(Assignment.rank_order, Assignment.id)
+    ).unique().all()
+
+    slot_rank = {code: idx for idx, code in enumerate(get_reference().slot_codes)}
+    desks = sorted(
+        (a for a in assignments if a.kind == "desk"),
+        key=lambda a: (slot_rank.get(a.role_slot or "", 99), a.rank_order, a.id),
+    )
+    desks = [_entry(a, cutoff, seed_files) for a in desks]
+
+    reporters_by_dept: dict[str, list[Entry]] = {}
+    for assignment in assignments:
+        if assignment.kind != "reporter":
+            continue
+        reporters_by_dept.setdefault(assignment.dept or "기타", []).append(
+            _entry(assignment, cutoff, seed_files)
+        )
+
+    source = session.scalar(
+        select(SourceFile)
+        .join(ChangeSet, ChangeSet.source_file_id == SourceFile.id)
+        .where(ChangeSet.status == APPLIED)
+        .order_by(SourceFile.as_of.desc())
+        .limit(1)
+    )
+
+    return {
+        "outlet": outlet,
+        "desks": desks,
+        "reporters_by_dept": dict(sorted(reporters_by_dept.items())),
+        "reporter_total": sum(len(v) for v in reporters_by_dept.values()),
+        "source": source,
+    }
+
+
+def person_detail(session: Session, person_id: int) -> dict | None:
+    person = session.get(Person, person_id)
+    if person is None:
+        return None
+    history = session.scalars(
+        select(Assignment)
+        .options(joinedload(Assignment.outlet))
+        .where(Assignment.person_id == person_id)
+        .order_by(Assignment.valid_from.desc(), Assignment.id.desc())
+    ).unique().all()
+    return {
+        "person": person,
+        "current": [a for a in history if a.valid_to is None],
+        "past": [a for a in history if a.valid_to is not None],
+        "phones": sorted(person.phones, key=lambda p: p.valid_from, reverse=True),
+    }
+
+
+def recent_changes(session: Session, limit: int = 200) -> list[Change]:
+    return list(
+        session.scalars(
+            select(Change)
+            .join(ChangeSet)
+            .options(joinedload(Change.change_set).joinedload(ChangeSet.source_file))
+            .where(Change.applied.is_(True))
+            .order_by(Change.id.desc())
+            .limit(limit)
+        ).unique().all()
+    )
+
+
+def stats(session: Session) -> dict:
+    current = select(Assignment).where(Assignment.valid_to.is_(None)).subquery()
+    return {
+        "outlets": session.scalar(
+            select(func.count(func.distinct(current.c.outlet_id))).select_from(current)
+        )
+        or 0,
+        "desks": session.scalar(
+            select(func.count()).select_from(current).where(current.c.kind == "desk")
+        )
+        or 0,
+        "reporters": session.scalar(
+            select(func.count()).select_from(current).where(current.c.kind == "reporter")
+        )
+        or 0,
+        "people": session.scalar(select(func.count()).select_from(Person)) or 0,
+        "last_file": session.scalar(
+            select(SourceFile)
+            .join(ChangeSet, ChangeSet.source_file_id == SourceFile.id)
+            .where(ChangeSet.status == APPLIED)
+            .order_by(SourceFile.as_of.desc())
+            .limit(1)
+        ),
+    }
