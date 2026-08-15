@@ -16,13 +16,25 @@
 
 ## 1. 서버에 올리기
 
-우분투 서버에서 아래 세 줄이면 끝입니다.
+> ⚠️ **우분투 서버에서 실행하세요.** 맥에서 실행하면 안 됩니다.
+> `ssh ubuntu@<서버주소>` 로 접속한 뒤 진행합니다.
+
+도커가 아직 없다면 먼저 설치합니다 (한 번만).
+
+```bash
+curl -fsSL https://get.docker.com | sh
+sudo usermod -aG docker $USER && newgrp docker
+```
+
+그다음 세 줄이면 끝입니다.
 
 ```bash
 git clone -b claude/media-contacts-web-portal-mtcwwq https://github.com/hongukchung-dot/contacts.git
 cd contacts
 ./deploy.sh
 ```
+
+`./deploy.sh --install-docker` 로 실행하면 도커 설치까지 스크립트가 대신 해 줍니다.
 
 `deploy.sh` 가 하는 일:
 
@@ -173,6 +185,9 @@ app_user, audit_log              계정과 접속·조회 기록
 - 비밀번호는 argon2 해시, 세션은 서명 쿠키(HttpOnly, 12시간)
 - DB 포트는 외부로 열지 않음 (앱 컨테이너에서만 접근)
 - 매일 03:00 `pg_dump` 자동 백업, 14일치 보관 (`./backups/`)
+  · 시각·보관일수는 `.env` 의 `BACKUP_HOUR` / `BACKUP_KEEP_DAYS` 로 조정
+  · 지금 바로 한 번 뜨기: `docker compose exec backup /scripts/backup.sh --once`
+  · 복원: `docker compose exec -T db pg_restore -U contacts -d contacts --clean < backups/<파일>.dump`
 
 **직접 챙기셔야 할 것**
 
