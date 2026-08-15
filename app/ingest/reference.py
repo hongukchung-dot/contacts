@@ -2,7 +2,7 @@
 
 `data/reference/*.yml` 을 읽어 원본 표기(별칭, 자유 서술 직책)를
 표준 코드로 바꿔 준다. 사전에 없는 값이 나와도 파싱을 실패시키지 않고
-`미분류`로 통과시킨 뒤 리포트에 남긴다 — 원본 파일이 계속 바뀌기 때문이다.
+`기타`로 통과시킨 뒤 리포트에 남긴다 — 원본 파일이 계속 바뀌기 때문이다.
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ _DEPT_SUFFIX_RE = re.compile(
 
 REFERENCE_DIR = Path(__file__).resolve().parents[2] / "data" / "reference"
 
-UNCLASSIFIED = "미분류"
+UNCLASSIFIED = "기타"
 
 
 @dataclass(frozen=True)

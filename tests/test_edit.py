@@ -354,7 +354,7 @@ class TestMergeOutlets:
         keep = db_session.scalar(select(Outlet).where(Outlet.name == "헤럴드경제"))
         assert keep is not None
         drop = Outlet(
-            name="헤럴드", name_key=normalize_key("헤럴드"), category="미분류", sort_order=9000
+            name="헤럴드", name_key=normalize_key("헤럴드"), category="기타", sort_order=9000
         )
         db_session.add(drop)
         db_session.flush()

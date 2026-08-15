@@ -83,6 +83,8 @@ MIGRATIONS = [
     "ALTER TABLE person ADD COLUMN IF NOT EXISTS email varchar(120)",
     "ALTER TABLE person ADD COLUMN IF NOT EXISTS memo text",
     "CREATE INDEX IF NOT EXISTS ix_person_email ON person (email)",
+    # 분류 이름 변경: '미분류' → '기타' (여러 번 실행해도 안전)
+    "UPDATE outlet SET category = '기타' WHERE category = '미분류'",
 ]
 
 

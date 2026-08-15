@@ -379,7 +379,7 @@ def _is_stale(session: Session, source_file: SourceFile, records: list[ContactRe
 
 
 def _ensure_outlet_rows(session: Session, records: list[ContactRecord]) -> dict[str, Outlet]:
-    """파일에 나온 매체를 확보한다. 사전에 없으면 '미분류'로 새로 만든다."""
+    """파일에 나온 매체를 확보한다. 사전에 없으면 '기타'로 새로 만든다."""
     reference = get_reference()
     outlets: dict[str, Outlet] = {}
     for record in records:

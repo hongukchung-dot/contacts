@@ -21,7 +21,7 @@ from ..models import (
     SourceFile,
 )
 
-CATEGORY_ORDER = ["종합지", "경제지", "방송", "통신사", "전문지", "영자지", "미분류"]
+CATEGORY_ORDER = ["종합지", "경제지", "방송", "통신사", "전문지", "영자지", "기타"]
 
 
 @dataclass
@@ -95,7 +95,8 @@ def matrix(session: Session, *, category: str | None = None) -> tuple[list[str],
         .options(joinedload(Assignment.person), joinedload(Assignment.outlet))
         .join(Outlet)
         .where(Assignment.valid_to.is_(None), Assignment.kind == "desk", Outlet.active.is_(True))
-        .order_by(Outlet.sort_order, Assignment.rank_order, Assignment.id)
+        # sort_order 가 같은 매체(기타 분류는 전부 9000)는 매체명 가나다순.
+        .order_by(Outlet.sort_order, Outlet.name, Assignment.rank_order, Assignment.id)
     )
     if category:
         stmt = stmt.where(Outlet.category == category)
