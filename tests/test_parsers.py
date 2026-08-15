@@ -215,3 +215,37 @@ def test_concurrent_role_keeps_column_slot():
     assert record.role_slot == "편집국장"
     assert record.role_label == "경제부장"
     assert record.concurrent is True
+
+
+class TestSecuredWorkbook:
+    """보안문서·DRM 도구를 거친 파일 대응 (openpyxl 이 죽는 형태)."""
+
+    @pytest.fixture()
+    def secured(self, tmp_path):
+        from tests.make_fixtures import inject_nameless_custom_property
+
+        return inject_nameless_custom_property(
+            FIXTURES / "sample_desk_matrix.xlsx", tmp_path / "secured.xlsx"
+        )
+
+    def test_openpyxl_alone_fails_on_this_file(self, secured):
+        """전제 확인: 그냥 열면 실제로 죽는다."""
+        from openpyxl import load_workbook
+
+        with pytest.raises(TypeError, match="Property"):
+            load_workbook(secured, data_only=True, read_only=True)
+
+    def test_our_loader_opens_it(self, secured):
+        from app.ingest.parsers import open_workbook
+
+        with open_workbook(secured) as workbook:
+            assert workbook.worksheets
+
+    def test_parses_identically_to_the_clean_file(self, secured):
+        clean = detect_and_parse(FIXTURES / "sample_desk_matrix.xlsx")
+        secured_result = detect_and_parse(secured)
+
+        assert secured_result.file_kind == "desk_matrix"
+        assert [r.name for r in secured_result.records] == [r.name for r in clean.records]
+        assert [r.phone for r in secured_result.records] == [r.phone for r in clean.records]
+        assert secured_result.unparsed == []

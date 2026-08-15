@@ -163,3 +163,49 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+def inject_nameless_custom_property(source: Path, target: Path) -> Path:
+    """이름이 비어 있는 사용자 지정 문서 속성을 심은 사본을 만든다.
+
+    보안문서·DRM 도구를 거친 실제 파일에서 나타나는 형태로, openpyxl 이
+    `StringProperty.name should be str but value is NoneType` 로 죽는 원인이다.
+    """
+    import shutil
+    import zipfile
+
+    custom_xml = (
+        b'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+        b'<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/custom-properties"'
+        b' xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes">'
+        b'<property fmtid="{D5CDD505-2E9C-101B-9397-08002B2CF9AE}" pid="2">'
+        b"<vt:lpwstr>secure-doc</vt:lpwstr></property>"
+        b"</Properties>"
+    )
+    override = (
+        '<Override PartName="/docProps/custom.xml" '
+        'ContentType="application/vnd.openxmlformats-officedocument.custom-properties+xml"/>'
+    )
+    relationship = (
+        '<Relationship Id="rIdCustom" '
+        'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/custom-properties" '
+        'Target="docProps/custom.xml"/>'
+    )
+
+    shutil.copy(source, target)
+    with zipfile.ZipFile(source) as src:
+        names = src.namelist()
+        payload = {name: src.read(name) for name in names}
+
+    payload["[Content_Types].xml"] = payload["[Content_Types].xml"].replace(
+        b"</Types>", override.encode() + b"</Types>"
+    )
+    payload["_rels/.rels"] = payload["_rels/.rels"].replace(
+        b"</Relationships>", relationship.encode() + b"</Relationships>"
+    )
+    payload["docProps/custom.xml"] = custom_xml
+
+    with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as out:
+        for name, data in payload.items():
+            out.writestr(name, data)
+    return target

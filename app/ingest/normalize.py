@@ -245,11 +245,15 @@ def _build_person(blob: str, raw_phone: str | None, source_text: str) -> ParsedP
     if raw_phone and not phone:
         warnings.append("번호를 해석하지 못해 비워 둠")
 
-    if len(name) > 5:
-        warnings.append(f"성명이 비정상적으로 김: {name!r} — 확인 필요")
+    normalized_name = normalize_name(name)
+    if len(normalized_name) > 20:
+        # 이 정도면 성명이 아니라 파싱이 어긋난 것이다. 억지로 넣지 않고 미해석으로 넘긴다.
+        return None
+    if len(normalized_name) > 5:
+        warnings.append(f"성명이 비정상적으로 김: {normalized_name!r} — 확인 필요")
 
     return ParsedPerson(
-        name=normalize_name(name),
+        name=normalized_name,
         raw_name=name,
         phone=phone,
         raw_phone=raw_phone,

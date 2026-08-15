@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 import shutil
 import tempfile
@@ -46,6 +47,8 @@ from .services.auth import (
     verify_password,
 )
 from .services.ingest import DuplicateFileError, apply_change_set, reject_all_pending, stage_file
+
+logger = logging.getLogger("contacts")
 
 app = FastAPI(title="언론사 주소록", docs_url=None, redoc_url=None, openapi_url=None)
 app.mount("/static", StaticFiles(directory=BASE_DIR / "app" / "static"), name="static")
@@ -360,6 +363,17 @@ async def upload(
     except ValueError as exc:
         db.rollback()
         return await _upload_error(request, db, user, str(exc))
+    except Exception as exc:  # noqa: BLE001 - 원인을 사용자에게 보여 주고 로그에 남긴다
+        db.rollback()
+        logger.exception("업로드 처리 실패: %s", file.filename)
+        return await _upload_error(
+            request,
+            db,
+            user,
+            f"파일을 처리하는 중 오류가 발생했습니다.\n\n"
+            f"{type(exc).__name__}: {exc}\n\n"
+            f"서버에서 'docker compose logs --tail=80 app' 으로 자세한 내용을 볼 수 있습니다.",
+        )
     finally:
         temp_path.unlink(missing_ok=True)
 

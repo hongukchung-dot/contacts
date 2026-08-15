@@ -13,7 +13,11 @@
 from __future__ import annotations
 
 import re
+import tempfile
+import zipfile
+from contextlib import contextmanager
 from pathlib import Path
+from xml.etree import ElementTree
 
 from .normalize import clean_text, is_empty, normalize_key, parse_people
 from .records import (
@@ -27,6 +31,89 @@ from .records import (
 from .reference import get_reference
 
 _HEADER_HINTS = {"매체", "매체명", "언론사"}
+
+_CUSTOM_PROPS_PART = "docProps/custom.xml"
+
+
+@contextmanager
+def open_workbook(path: Path):
+    """xlsx 를 연다. 열고 나면 반드시 닫는다.
+
+    보안문서·DRM 도구를 거친 파일은 `docProps/custom.xml` 의 사용자 지정 속성에
+    이름이 비어 있는 경우가 있는데, openpyxl 이 이를 만나면 표를 읽기도 전에
+    TypeError 로 죽는다(`StringProperty.name should be str but value is NoneType`).
+    그런 파일은 해당 부분만 들어낸 사본을 만들어 다시 연다. 표 데이터에는 영향이 없다.
+    """
+    from openpyxl import load_workbook
+
+    try:
+        workbook = load_workbook(path, data_only=True, read_only=True)
+    except TypeError as exc:
+        if "Property" not in str(exc):
+            raise
+        cleaned = _strip_custom_doc_props(path)
+        try:
+            workbook = load_workbook(cleaned, data_only=True, read_only=True)
+        except Exception:
+            cleaned.unlink(missing_ok=True)
+            raise
+        try:
+            yield workbook
+        finally:
+            workbook.close()
+            cleaned.unlink(missing_ok=True)
+        return
+
+    try:
+        yield workbook
+    finally:
+        workbook.close()
+
+
+def _strip_custom_doc_props(path: Path) -> Path:
+    """`docProps/custom.xml` 과 그 참조를 제거한 사본을 만들어 경로를 돌려준다."""
+    handle = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False)
+    handle.close()
+    target = Path(handle.name)
+
+    with zipfile.ZipFile(path) as source, zipfile.ZipFile(
+        target, "w", zipfile.ZIP_DEFLATED
+    ) as out:
+        for item in source.infolist():
+            if item.filename == _CUSTOM_PROPS_PART:
+                continue
+            data = source.read(item.filename)
+            if item.filename == "[Content_Types].xml":
+                data = _drop_xml_nodes(data, "Override", "PartName", "/" + _CUSTOM_PROPS_PART)
+            elif item.filename == "_rels/.rels":
+                data = _drop_xml_nodes(data, "Relationship", "Target", _CUSTOM_PROPS_PART)
+            out.writestr(item, data)
+    return target
+
+
+def _drop_xml_nodes(data: bytes, tag: str, attribute: str, value: str) -> bytes:
+    """지정한 속성값을 가진 노드를 XML 에서 제거한다. 실패하면 원본을 그대로 둔다."""
+    try:
+        root = ElementTree.fromstring(data)
+    except ElementTree.ParseError:
+        return data
+
+    namespace = root.tag.split("}")[0].strip("{") if root.tag.startswith("{") else ""
+    qualified = f"{{{namespace}}}{tag}" if namespace else tag
+    removed = [
+        child
+        for child in list(root)
+        if child.tag == qualified and (child.get(attribute) or "").lstrip("/") == value.lstrip("/")
+    ]
+    for child in removed:
+        root.remove(child)
+    if not removed:
+        return data
+    if namespace:
+        ElementTree.register_namespace("", namespace)
+    return ElementTree.tostring(root, encoding="utf-8", xml_declaration=True)
+
+
 _CATEGORY_ROW_RE = re.compile(r"^[\[<\(【]\s*(.+?)\s*[\]>\)】]$")
 _DEPT_SPLIT_RE = re.compile(r"\s*[:：]\s*")
 
@@ -101,72 +188,72 @@ def _is_header_row(values: list[str]) -> bool:
 # ── 1. 데스크 현황 xlsx (매트릭스) ──────────────────────────────────────────
 
 def parse_desk_matrix(path: Path) -> ParseResult:
-    from openpyxl import load_workbook
-
     result = ParseResult(file_kind="desk_matrix")
     result.as_of = as_of_from_filename(path.name)
-    workbook = load_workbook(path, data_only=True, read_only=True)
-    reference = get_reference()
 
-    for sheet in workbook.worksheets:
-        result.sheets.append(sheet.title)
-        columns: dict[int, str] = {}   # 열 인덱스 → 슬롯 코드
-        outlet_col: int | None = None
-        current_outlet: str | None = None
-
-        for row_idx, row in enumerate(sheet.iter_rows(), start=1):
-            values = _row_values(row)
-            if not any(values):
-                continue
-
-            joined = " ".join(v for v in values if v)
-            if result.as_of is None:
-                result.as_of = as_of_from_text(joined)
-
-            if _is_header_row(values):
-                columns, outlet_col = _build_column_map(values, reference)
-                current_outlet = None
-                if not columns:
-                    result.add_warning(f"[{sheet.title}] {row_idx}행 머리글에서 직책 열을 찾지 못함")
-                continue
-
-            if outlet_col is None:
-                continue  # 머리글 전의 제목/기준일 행
-
-            candidate = values[outlet_col] if outlet_col < len(values) else ""
-            if candidate and not is_empty(candidate):
-                if _CATEGORY_ROW_RE.match(candidate):
-                    continue  # `<종합지 데스크> 현황` 같은 구획 행
-                current_outlet = candidate
-            if not current_outlet:
-                continue
-
-            for col_idx, slot in columns.items():
-                if col_idx >= len(values):
-                    continue
-                cell_text = values[col_idx]
-                if is_empty(cell_text):
-                    continue
-                people = parse_people(cell_text)
-                if not people:
-                    result.unparsed.append(
-                        f"[{sheet.title}] {row_idx}행 {current_outlet}/{slot}: {cell_text!r}"
-                    )
-                    continue
-                for person in people:
-                    result.records.append(
-                        _make_record(
-                            person,
-                            current_outlet,
-                            DESK,
-                            slot_hint=slot,
-                            sheet=sheet.title,
-                            ref=f"{sheet.title}!R{row_idx}C{col_idx + 1}",
-                        )
-                    )
-
-    workbook.close()
+    with open_workbook(path) as workbook:
+        for sheet in workbook.worksheets:
+            _read_desk_sheet(sheet, result)
     return result
+
+
+def _read_desk_sheet(sheet, result: ParseResult) -> None:
+    reference = get_reference()
+    result.sheets.append(sheet.title)
+    columns: dict[int, str] = {}   # 열 인덱스 → 슬롯 코드
+    outlet_col: int | None = None
+    current_outlet: str | None = None
+
+    for row_idx, row in enumerate(sheet.iter_rows(), start=1):
+        values = _row_values(row)
+        if not any(values):
+            continue
+
+        joined = " ".join(v for v in values if v)
+        if result.as_of is None:
+            result.as_of = as_of_from_text(joined)
+
+        if _is_header_row(values):
+            columns, outlet_col = _build_column_map(values, reference)
+            current_outlet = None
+            if not columns:
+                result.add_warning(f"[{sheet.title}] {row_idx}행 머리글에서 직책 열을 찾지 못함")
+            continue
+
+        if outlet_col is None:
+            continue  # 머리글 전의 제목/기준일 행
+
+        candidate = values[outlet_col] if outlet_col < len(values) else ""
+        if candidate and not is_empty(candidate):
+            if _CATEGORY_ROW_RE.match(candidate):
+                continue  # `<종합지 데스크> 현황` 같은 구획 행
+            current_outlet = candidate
+        if not current_outlet:
+            continue
+
+        for col_idx, slot in columns.items():
+            if col_idx >= len(values):
+                continue
+            cell_text = values[col_idx]
+            if is_empty(cell_text):
+                continue
+            people = parse_people(cell_text)
+            if not people:
+                result.unparsed.append(
+                    f"[{sheet.title}] {row_idx}행 {current_outlet}/{slot}: {cell_text!r}"
+                )
+                continue
+            for person in people:
+                result.records.append(
+                    _make_record(
+                        person,
+                        current_outlet,
+                        DESK,
+                        slot_hint=slot,
+                        sheet=sheet.title,
+                        ref=f"{sheet.title}!R{row_idx}C{col_idx + 1}",
+                    )
+                )
 
 
 def _build_column_map(values: list[str], reference) -> tuple[dict[int, str], int | None]:
@@ -202,66 +289,66 @@ _REPORTER_HEADERS = {
 
 
 def parse_reporter_list(path: Path) -> ParseResult:
-    from openpyxl import load_workbook
-
     result = ParseResult(file_kind="reporter_list")
     result.as_of = as_of_from_filename(path.name)
-    workbook = load_workbook(path, data_only=True, read_only=True)
 
-    for sheet in workbook.worksheets:
-        result.sheets.append(sheet.title)
-        mapping: dict[str, int] = {}
-        current_outlet: str | None = None
-
-        for row_idx, row in enumerate(sheet.iter_rows(), start=1):
-            values = _row_values(row)
-            if not any(values):
-                continue
-
-            joined = " ".join(v for v in values if v)
-            if result.as_of is None:
-                result.as_of = as_of_from_text(joined)
-
-            new_mapping = _build_reporter_map(values)
-            if new_mapping:
-                mapping = new_mapping
-                current_outlet = None
-                continue
-            if not mapping:
-                continue
-
-            outlet_cell = values[mapping["outlet"]] if mapping.get("outlet", -1) < len(values) else ""
-            if outlet_cell and not is_empty(outlet_cell):
-                if _CATEGORY_ROW_RE.match(outlet_cell):
-                    continue
-                current_outlet = outlet_cell
-            if not current_outlet:
-                continue
-
-            name_cell = values[mapping["name"]] if mapping.get("name", 99) < len(values) else ""
-            role_cell = values[mapping["role"]] if mapping.get("role", 99) < len(values) else ""
-            phone_cell = values[mapping["phone"]] if mapping.get("phone", 99) < len(values) else ""
-            if is_empty(name_cell) and is_empty(phone_cell):
-                continue
-
-            blob = " ".join(part for part in [name_cell, role_cell, phone_cell] if part)
-            people = parse_people(blob)
-            if not people:
-                result.unparsed.append(f"[{sheet.title}] {row_idx}행: {blob!r}")
-                continue
-            for person in people:
-                result.records.append(
-                    _make_record(
-                        person,
-                        current_outlet,
-                        REPORTER,
-                        sheet=sheet.title,
-                        ref=f"{sheet.title}!R{row_idx}",
-                    )
-                )
-
-    workbook.close()
+    with open_workbook(path) as workbook:
+        for sheet in workbook.worksheets:
+            _read_reporter_sheet(sheet, result)
     return result
+
+
+def _read_reporter_sheet(sheet, result: ParseResult) -> None:
+    result.sheets.append(sheet.title)
+    mapping: dict[str, int] = {}
+    current_outlet: str | None = None
+
+    for row_idx, row in enumerate(sheet.iter_rows(), start=1):
+        values = _row_values(row)
+        if not any(values):
+            continue
+
+        joined = " ".join(v for v in values if v)
+        if result.as_of is None:
+            result.as_of = as_of_from_text(joined)
+
+        new_mapping = _build_reporter_map(values)
+        if new_mapping:
+            mapping = new_mapping
+            current_outlet = None
+            continue
+        if not mapping:
+            continue
+
+        outlet_cell = values[mapping["outlet"]] if mapping.get("outlet", -1) < len(values) else ""
+        if outlet_cell and not is_empty(outlet_cell):
+            if _CATEGORY_ROW_RE.match(outlet_cell):
+                continue
+            current_outlet = outlet_cell
+        if not current_outlet:
+            continue
+
+        name_cell = values[mapping["name"]] if mapping.get("name", 99) < len(values) else ""
+        role_cell = values[mapping["role"]] if mapping.get("role", 99) < len(values) else ""
+        phone_cell = values[mapping["phone"]] if mapping.get("phone", 99) < len(values) else ""
+        if is_empty(name_cell) and is_empty(phone_cell):
+            continue
+
+        blob = " ".join(part for part in [name_cell, role_cell, phone_cell] if part)
+        people = parse_people(blob)
+        if not people:
+            result.unparsed.append(f"[{sheet.title}] {row_idx}행: {blob!r}")
+            continue
+        for person in people:
+            result.records.append(
+                _make_record(
+                    person,
+                    current_outlet,
+                    REPORTER,
+                    sheet=sheet.title,
+                    ref=f"{sheet.title}!R{row_idx}",
+                )
+            )
 
 
 def _build_reporter_map(values: list[str]) -> dict[str, int]:
@@ -391,10 +478,7 @@ def detect_kind(path: Path) -> str:
     if suffix not in {".xlsx", ".xlsm"}:
         raise ValueError(f"지원하지 않는 파일 형식입니다: {suffix} (xlsx/docx만 가능)")
 
-    from openpyxl import load_workbook
-
-    workbook = load_workbook(path, data_only=True, read_only=True)
-    try:
+    with open_workbook(path) as workbook:
         for sheet in workbook.worksheets:
             for row in sheet.iter_rows(min_row=1, max_row=30):
                 values = _row_values(row)
@@ -404,8 +488,6 @@ def detect_kind(path: Path) -> str:
                     columns, _ = _build_column_map(values, get_reference())
                     if len(columns) >= 3:
                         return "desk_matrix"
-    finally:
-        workbook.close()
     raise ValueError(
         "파일 구조를 인식하지 못했습니다. "
         "'매체명'과 직책 열이 있는 데스크 표, 또는 '매체/이름/직급/전화번호' 열이 있는 "

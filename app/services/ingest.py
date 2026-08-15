@@ -57,6 +57,18 @@ class DuplicateFileError(Exception):
         )
 
 
+def _fit(value: str | None, limit: int) -> str | None:
+    """DB 컬럼 길이에 맞춰 자른다.
+
+    원본 표기가 예상보다 길어도 적재가 통째로 실패하지 않도록 한다.
+    잘린 값이 있어도 원문은 source_record.source_text 에 그대로 남는다.
+    """
+    if value is None:
+        return None
+    value = value.strip()
+    return value[:limit] if len(value) > limit else value
+
+
 def sha256_of(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -106,19 +118,19 @@ def stage_file(
         session.add(
             SourceRecord(
                 source_file_id=source_file.id,
-                outlet_raw=record.outlet_raw[:80],
-                outlet_name=record.outlet[:80],
-                name=record.name[:40],
-                phone=record.phone,
+                outlet_raw=_fit(record.outlet_raw, 80),
+                outlet_name=_fit(record.outlet, 80),
+                name=_fit(record.name, 40),
+                phone=_fit(record.phone, 20),
                 kind=record.kind,
-                role_slot=record.role_slot,
-                role_label=(record.role_label or None) and record.role_label[:120],
-                dept=record.dept,
-                rank=record.rank,
+                role_slot=_fit(record.role_slot, 30),
+                role_label=_fit(record.role_label, 120),
+                dept=_fit(record.dept, 40),
+                rank=_fit(record.rank, 10),
                 rank_order=record.rank_order,
-                note=(record.note or None) and record.note[:120],
+                note=_fit(record.note, 120),
                 concurrent=record.concurrent,
-                source_ref=record.source_ref[:80],
+                source_ref=_fit(record.source_ref, 80),
                 source_text=record.source_text,
                 warnings=record.warnings or None,
             )
@@ -338,8 +350,8 @@ def _ensure_outlet_rows(session: Session, records: list[ContactRecord]) -> dict[
         if outlet is None:
             match = reference.match_outlet(record.outlet)
             outlet = Outlet(
-                name=record.outlet,
-                name_key=normalize_key(record.outlet),
+                name=_fit(record.outlet, 80),
+                name_key=_fit(normalize_key(record.outlet), 80),
                 category=match.category if match else record.category,
                 sort_order=match.order if match else 9000,
             )
@@ -350,7 +362,11 @@ def _ensure_outlet_rows(session: Session, records: list[ContactRecord]) -> dict[
                 select(OutletAlias).where(OutletAlias.alias_key == alias_key)
             ):
                 session.add(
-                    OutletAlias(outlet_id=outlet.id, alias=record.outlet_raw, alias_key=alias_key)
+                    OutletAlias(
+                        outlet_id=outlet.id,
+                        alias=_fit(record.outlet_raw, 80),
+                        alias_key=_fit(alias_key, 80),
+                    )
                 )
         outlets[record.outlet] = outlet
     return outlets
@@ -464,8 +480,21 @@ def _detect_removals(
         )
 
 
+_CHANGE_LIMITS = {
+    "outlet_name": 80,
+    "person_name": 40,
+    "field": 30,
+    "old_value": 300,
+    "new_value": 300,
+    "reason": 300,
+}
+
+
 def _add(change_set: ChangeSet, **kwargs) -> None:
     auto = kwargs.pop("auto_apply", False)
+    for key, limit in _CHANGE_LIMITS.items():
+        if key in kwargs:
+            kwargs[key] = _fit(kwargs[key], limit)
     change = Change(
         change_set_id=change_set.id,
         auto_apply=auto,
@@ -582,9 +611,9 @@ def _get_or_create_person(session: Session, change: Change) -> Person:
         return existing
 
     person = Person(
-        name=change.person_name,
-        name_key=name_key,
-        phone=phone,
+        name=_fit(change.person_name, 40),
+        name_key=_fit(name_key, 40),
+        phone=_fit(phone, 20),
     )
     session.add(person)
     session.flush()
@@ -689,12 +718,12 @@ def _apply_assignment(session: Session, change: Change, as_of: date, source_file
             person_id=person.id,
             outlet_id=outlet_id,
             kind=payload.get("kind", "reporter"),
-            role_slot=payload.get("role_slot"),
-            role_label=payload.get("role_label"),
-            dept=payload.get("dept"),
-            rank=payload.get("rank", "기자"),
+            role_slot=_fit(payload.get("role_slot"), 30),
+            role_label=_fit(payload.get("role_label"), 120),
+            dept=_fit(payload.get("dept"), 40),
+            rank=_fit(payload.get("rank", "기자"), 10),
             rank_order=payload.get("rank_order", 50),
-            note=payload.get("note"),
+            note=_fit(payload.get("note"), 120),
             concurrent=bool(payload.get("concurrent")),
             valid_from=as_of,
             source_file_id=source_file_id,
