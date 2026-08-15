@@ -249,18 +249,49 @@ fi
 # ── 3. 안내 ─────────────────────────────────────────────────────────────────
 
 SITE=$(get_env SITE_ADDRESS); SITE=${SITE:-:80}
-HOST_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
-case "$SITE" in
-  :*)
-    if [ "$HTTP_PORT" = "80" ]; then URL="http://${HOST_IP}"; else URL="http://${HOST_IP}:${HTTP_PORT}"; fi
-    ;;
-  *)
-    if [ "$HTTPS_PORT" = "443" ]; then URL="https://${SITE}"; else URL="https://${SITE}:${HTTPS_PORT}"; fi
-    ;;
-esac
+PORT_SUFFIX=""
+[ "$HTTP_PORT" != "80" ] && PORT_SUFFIX=":${HTTP_PORT}"
 
 echo
-info "완료. 접속 주소: ${URL}"
+info "완료. 접속이 되는지 먼저 서버 안에서 확인합니다 …"
+if curl -fsS -o /dev/null "http://127.0.0.1:${HTTP_PORT}/login" 2>/dev/null; then
+  echo "      ✓ 앱 응답 정상 (http://127.0.0.1:${HTTP_PORT})"
+else
+  warn "앱이 아직 응답하지 않습니다. 'docker compose logs app caddy' 를 확인하세요."
+fi
+
+echo
+case "$SITE" in
+  :*)
+    info "브라우저에서 아래 주소 중 접속 가능한 것으로 여세요."
+    # Tailscale 주소가 있으면 가장 먼저 권한다 — 사설망이라 개인정보 노출 위험이 낮다.
+    if command -v tailscale >/dev/null 2>&1; then
+      TS_IP=$(tailscale ip -4 2>/dev/null | head -1 || true)
+      [ -n "$TS_IP" ] && echo "      http://${TS_IP}${PORT_SUFFIX}   ← Tailscale (같은 tailnet 기기에서, 권장)"
+    fi
+    for ip in $(hostname -I 2>/dev/null); do
+      case "$ip" in
+        100.*|127.*) continue ;;                       # tailscale/loopback 은 위에서 처리
+        10.*|192.168.*|172.1[6-9].*|172.2*.*|172.3[01].*)
+          echo "      http://${ip}${PORT_SUFFIX}   ← 사설망 (같은 네트워크 안에서만)" ;;
+        *)
+          echo "      http://${ip}${PORT_SUFFIX}   ← 이 서버의 IP" ;;
+      esac
+    done
+    PUBLIC_IP=$(curl -fsS --max-time 3 https://api.ipify.org 2>/dev/null || true)
+    [ -n "$PUBLIC_IP" ] && echo "      http://${PUBLIC_IP}${PORT_SUFFIX}   ← 공인 IP (방화벽에서 ${HTTP_PORT} 를 열어야 함)"
+    echo
+    echo "      공인 IP로 열려면:  sudo ufw allow ${HTTP_PORT}/tcp"
+    echo "      (클라우드라면 콘솔의 보안 그룹에서도 ${HTTP_PORT} 인바운드를 열어야 합니다)"
+    ;;
+  *)
+    if [ "$HTTPS_PORT" = "443" ]; then
+      info "접속 주소: https://${SITE}"
+    else
+      info "접속 주소: https://${SITE}:${HTTPS_PORT}"
+    fi
+    ;;
+esac
 echo
 info "다음 순서로 진행하세요"
 echo "   1) 위 관리자 계정으로 로그인 → 비밀번호 변경"
