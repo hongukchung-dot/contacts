@@ -133,6 +133,40 @@ def reload_sources(sources, *, approve_all: bool) -> None:
             print(f"    ✗ 실패: {type(exc).__name__}: {exc}")
 
 
+def report_lookalike_outlets() -> None:
+    """이름이 서로 겹치는 매체를 짚어 준다.
+
+    `조선일보`/`조선비즈` 처럼 앞부분이 같은 매체가 실수로 합쳐지지 않았는지,
+    혹은 반대로 같은 매체가 두 이름으로 갈라지지 않았는지 눈으로 확인하기 위한 것.
+    """
+    from app.models import Outlet
+
+    with session_scope() as session:
+        rows = session.execute(
+            select(Outlet.name, Outlet.category, func.count(Assignment.id))
+            .join(Assignment, Assignment.outlet_id == Outlet.id, isouter=True)
+            .group_by(Outlet.id)
+            .order_by(Outlet.sort_order)
+        ).all()
+
+    active = [(name, category, count) for name, category, count in rows if count]
+    pairs = [
+        (a, b)
+        for a in active
+        for b in active
+        if a[0] != b[0] and b[0].startswith(a[0])
+    ]
+    if not pairs:
+        return
+    print("\n" + "=" * 74)
+    print("이름이 비슷한 매체 — 서로 다른 매체가 맞는지 확인하세요")
+    for (short_name, short_cat, short_count), (long_name, long_cat, long_count) in pairs:
+        print(f"  · {short_name} ({short_cat}, {short_count}건)  ↔  "
+              f"{long_name} ({long_cat}, {long_count}건)")
+    print("  같은 매체라면 data/reference/outlets.yml 에서 한쪽을 별칭으로 옮기고,")
+    print("  웹의 인물 페이지에서 중복 인물을 합치면 됩니다.")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="보관된 원본 파일로 데이터를 다시 만든다")
     parser.add_argument("--yes", action="store_true", help="실제로 실행 (없으면 계획만 출력)")
@@ -174,6 +208,8 @@ def main() -> int:
 
     print("· 원본 파일을 기준일 순서로 다시 넣습니다 …\n")
     reload_sources(sources, approve_all=args.approve_all)
+
+    report_lookalike_outlets()
 
     after = summarise()
     print("\n" + "=" * 74)

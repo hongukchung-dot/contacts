@@ -133,23 +133,36 @@ def _make_record(
     reference = get_reference()
     outlet, category, _order, known = reference.outlet_or_placeholder(outlet_raw)
 
-    role_slot = reference.slot_from_label(person.role_label)
-    if person.concurrent and slot_hint:
-        # `편집국장` 열에 `(兼 경제부장)` 이라 적힌 경우 본직은 열 쪽이다.
-        role_slot = slot_hint
     rank, rank_order = reference.rank_of(person.role_label)
+
+    # 간부 현황 표의 칸(role_slot)은 데스크만 차지한다.
+    # 출입기자에게 칸을 주면 `산업부 차장`이 산업부장 칸에 들어가 버린다.
+    role_slot: str | None = None
+    if kind == DESK:
+        role_slot = reference.slot_from_label(person.role_label)
+        if person.concurrent and slot_hint:
+            # `편집국장` 열에 `(兼 경제부장)` 이라 적힌 경우 본직은 열 쪽이다.
+            role_slot = slot_hint
+        if role_slot is None and dept_hint:
+            # 직책이 `부장`뿐이고 부서가 따로 적힌 경우: `테크부` + `장` → 테크부장 → 산업부장 슬롯
+            role_slot = reference.slot_from_label(f"{dept_hint}장")
+        if role_slot is None:
+            role_slot = slot_hint
+
     dept = reference.dept_of(person.role_label) or dept_hint
-    if role_slot is None and dept_hint:
-        # docx처럼 직책이 `부장`뿐이고 부서가 따로 적힌 경우: `테크부` + `장` → 테크부장 → 산업부장 슬롯
-        role_slot = reference.slot_from_label(f"{dept_hint}장")
-    if role_slot is None:
-        role_slot = slot_hint
     if dept is None and role_slot:
         dept = reference.dept_of(role_slot)
 
     warnings = list(person.warnings)
     if not known:
-        warnings.append(f"사전에 없는 매체: {outlet_raw!r} — 분류 지정 필요")
+        near = reference.near_miss(outlet_raw)
+        if near:
+            warnings.append(
+                f"사전에 없는 매체: {outlet_raw!r} — {near.name} 와(과) 이름이 비슷하지만 "
+                "다른 매체로 등록합니다. 같은 매체라면 outlets.yml 에 별칭을 넣어 주세요"
+            )
+        else:
+            warnings.append(f"사전에 없는 매체: {outlet_raw!r} — 분류 지정 필요")
     if person.phone is None:
         warnings.append("전화번호 없음")
 
@@ -175,6 +188,29 @@ def _make_record(
         source_text=person.source_text,
         warnings=warnings,
     )
+
+
+# 데스크로 볼 직급. 이보다 아래(차장·팀장·기자)는 출입기자로 본다.
+_DESK_RANKS = {"경영", "국장", "부장"}
+
+
+def classify_kind(role_label: str | None, *, fallback: str) -> str:
+    """직급으로 데스크/출입기자를 가른다.
+
+    통합 docx 는 매체마다 맨 위에 부장급 데스크가 오고 그 아래에 출입기자가 붙는다.
+    그런데 행 위치만 보고 나누면 배치가 조금만 달라져도 출입기자가 데스크로 잡힌다.
+    실제로 그런 오류가 대량으로 났다. 직급이라는 값 자체를 기준으로 삼는 편이 안전하다.
+
+    직급이 안 적힌 사람은 부장일 가능성이 낮으므로 fallback(대개 출입기자)을 따른다.
+    """
+    if not role_label:
+        return fallback
+    rank, _ = get_reference().rank_of(role_label)
+    if rank in _DESK_RANKS:
+        return DESK
+    if rank in {"차장", "기자"}:
+        return REPORTER
+    return fallback
 
 
 def _row_values(row) -> list[str]:
@@ -450,11 +486,13 @@ def parse_combined_docx(path: Path) -> ParseResult:
                     dept, body = _split_dept(cell_text)
                     dept_slots.append(dept)
                     for person in parse_people(body):
+                        # 맨 윗줄이라도 차장·기자면 출입기자다.
+                        kind = classify_kind(person.role_label, fallback=DESK)
                         result.records.append(
                             _make_record(
                                 person,
                                 current_outlet,
-                                DESK,
+                                kind,
                                 # 이 문서는 산업 출입처 데스크 명단이므로,
                                 # 부서 표기가 없는 칸(`이관범 부장 …`)은 산업부장으로 본다.
                                 slot_hint="산업부장",
@@ -484,11 +522,14 @@ def parse_combined_docx(path: Path) -> ParseResult:
                     result.unparsed.append(f"[{sheet}] {row_idx}행 {current_outlet}: {cell_text!r}")
                     continue
                 for person in people:
+                    # 아랫줄이라도 부장급이면 데스크다.
+                    kind = classify_kind(person.role_label, fallback=REPORTER)
                     result.records.append(
                         _make_record(
                             person,
                             current_outlet,
-                            REPORTER,
+                            kind,
+                            slot_hint="산업부장" if kind == DESK else None,
                             dept_hint=reference.dept_of(dept) or dept,
                             sheet=sheet,
                             ref=f"{sheet}!R{row_idx}C{col_idx + 1}",

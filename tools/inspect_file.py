@@ -61,11 +61,31 @@ def report(path: Path, *, full: bool, reveal: bool) -> int:
     for category, outlets in sorted(by_category.items()):
         print(f"    · {category} {len(outlets)}개: {', '.join(sorted(outlets))}")
 
+    # 원본 표기가 어느 매체로 들어갔는지 — 서로 다른 매체가 합쳐지지 않았는지 눈으로 확인한다.
+    from app.ingest.reference import get_reference
+
+    reference = get_reference()
+    mapping: dict[str, str] = {}
+    for record in result.records:
+        mapping[record.outlet_raw] = record.outlet
+    print("\n  매체 매핑 (원본 표기 → 등록 매체)")
+    for raw in sorted(mapping):
+        resolved = mapping[raw]
+        mark = ""
+        if raw != resolved:
+            mark = "   ← 표기가 다름"
+        if not reference.match_outlet(raw):
+            near = reference.near_miss(raw)
+            mark = f"   ← 사전에 없음{f' (⚠ {near.name} 와 비슷)' if near else ''}"
+        print(f"      {raw:20s} → {resolved:20s}{mark}")
+
     unknown = sorted({r.outlet_raw for r in result.records if not r.outlet_known})
     if unknown:
         print(f"\n  ⚠ 사전에 없는 매체 {len(unknown)}개 → data/reference/outlets.yml 에 추가하세요")
         for name in unknown:
-            print(f"      - {name}")
+            near = reference.near_miss(name)
+            hint = f"  (⚠ {near.name} 와 이름이 비슷합니다. 같은 매체면 별칭으로 넣으세요)" if near else ""
+            print(f"      - {name}{hint}")
 
     no_phone = [r for r in result.records if not r.phone]
     if no_phone:

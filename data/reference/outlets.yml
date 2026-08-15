@@ -5,8 +5,12 @@
 # - order    : 화면 정렬 순서 (작을수록 위)
 # - aliases  : 원본 파일에 등장하는 표기 변형. 공백은 무시되므로 굳이 넣지 않아도 된다.
 #
-# 여기에 없는 매체가 파일에 나오면 자동으로 '미분류'로 등록되고
-# 관리자 화면에서 분류만 지정하면 된다. (파싱이 실패하지는 않는다)
+# 여기에 없는 매체가 파일에 나오면 **새 매체**로 등록되고 '미분류'로 표시된다.
+# 파싱이 실패하지는 않으며, 검토 화면과 점검 도구에 목록이 뜬다.
+#
+# ⚠️ 앞부분이 같다고 다른 매체로 이어 붙이지 않는다.
+#    조선일보 ≠ 조선비즈, 연합뉴스 ≠ 연합뉴스TV, 한국경제 ≠ 한국경제TV.
+#    이런 매체는 반드시 각각 등록해야 하며, 별칭도 서로 겹치면 안 된다.
 
 outlets:
   # ── 종합지 ─────────────────────────────────────────────
@@ -105,6 +109,41 @@ outlets:
     order: 211
     aliases: [thebell]
 
+  # ── 인터넷·계열 경제매체 ───────────────────────────────
+  # ⚠️ 아래는 모기업과 **다른 매체**입니다. 절대 합치지 마세요.
+  - name: 조선비즈
+    category: 경제지
+    order: 220
+    aliases: [chosunbiz]
+  - name: 한경비즈니스
+    category: 경제지
+    order: 221
+    aliases: []
+  - name: 매경이코노미
+    category: 경제지
+    order: 222
+    aliases: []
+  - name: 머니S
+    category: 경제지
+    order: 223
+    aliases: [머니에스]
+  - name: 아이뉴스24
+    category: 경제지
+    order: 224
+    aliases: [아이뉴스]
+  - name: 지디넷코리아
+    category: 전문지
+    order: 225
+    aliases: [지디넷, zdnet]
+  - name: 뉴데일리
+    category: 경제지
+    order: 226
+    aliases: [뉴데일리경제]
+  - name: 인베스트조선
+    category: 경제지
+    order: 227
+    aliases: []
+
   # ── 전문지 / 영자지 ────────────────────────────────────
   - name: 전자신문
     category: 전문지
@@ -186,3 +225,20 @@ outlets:
     category: 방송
     order: 511
     aliases: [SBSBiz, SBS비즈, SBS CNBC]
+  # ⚠️ 아래 경제 채널들은 같은 이름의 신문사와 **다른 매체**입니다.
+  - name: 한국경제TV
+    category: 방송
+    order: 512
+    aliases: [한경TV, 와우넷]
+  - name: 서울경제TV
+    category: 방송
+    order: 513
+    aliases: [서경TV, SEN]
+  - name: 이데일리TV
+    category: 방송
+    order: 514
+    aliases: []
+  - name: 매일경제TV
+    category: 방송
+    order: 515
+    aliases: [MBN머니, 매경TV]

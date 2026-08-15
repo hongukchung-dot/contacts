@@ -284,3 +284,75 @@ class TestMixedSheets:
         assert sum(result.sheet_counts.values()) == len(result.records)
         assert result.sheet_counts["데스크"] == 3
         assert result.sheet_counts["출입기자"] == 3
+
+
+class TestDeskReporterByRank:
+    """통합 docx 의 데스크/출입기자는 줄 위치가 아니라 직급으로 가른다."""
+
+    @pytest.fixture(scope="class")
+    def result(self):
+        return detect_and_parse(FIXTURES / "sample_combined.docx")
+
+    def test_bujang_in_the_top_row_is_a_desk(self, result):
+        assert find(result.records, "이강은")[0].kind == DESK
+
+    def test_chajang_in_the_top_row_is_a_reporter(self, result):
+        """맨 윗줄에 함께 적혔어도 차장이면 출입기자다."""
+        record = find(result.records, "김건호")[0]
+        assert record.kind == REPORTER
+        assert record.role_slot is None, "출입기자는 간부 표의 칸을 차지하지 않는다"
+
+    def test_bujang_in_a_team_row_is_a_desk(self, result):
+        """아랫줄에 있어도 부장이면 데스크다."""
+        record = find(result.records, "모규엽")[0]
+        assert record.kind == DESK
+        assert record.role_slot == "산업부장"
+
+    def test_chajang_in_a_team_row_stays_a_reporter(self, result):
+        assert find(result.records, "권지혜")[0].kind == REPORTER
+
+    def test_person_without_rank_follows_the_row(self, result):
+        """직급이 안 적힌 팀원은 출입기자로 둔다."""
+        record = find(result.records, "임성호")[0]
+        assert record.kind == REPORTER
+        assert record.role_slot is None
+
+    def test_no_reporter_occupies_a_matrix_slot(self, result):
+        offenders = [r.name for r in result.records if r.kind == REPORTER and r.role_slot]
+        assert offenders == [], offenders
+
+
+class TestSimilarOutletsStaySeparate:
+    """이름이 비슷해도 다른 매체는 합치지 않는다."""
+
+    @pytest.fixture(scope="class")
+    def result(self):
+        return detect_and_parse(FIXTURES / "sample_combined.docx")
+
+    def test_chosun_biz_is_not_chosun_ilbo(self, result):
+        assert find(result.records, "최우석")[0].outlet == "조선비즈"
+        assert find(result.records, "전수용")[0].outlet == "조선일보"
+
+    def test_yonhap_tv_is_not_yonhap(self, result):
+        assert find(result.records, "박상돈")[0].outlet == "연합뉴스TV"
+        assert find(result.records, "박용주")[0].outlet == "연합뉴스"
+
+    def test_both_are_recognised_outlets(self, result):
+        for name in ("최우석", "박상돈"):
+            assert find(result.records, name)[0].outlet_known is True
+
+
+class TestNearMissWarning:
+    def test_unknown_lookalike_is_flagged(self):
+        from app.ingest.reference import get_reference
+
+        reference = get_reference()
+        assert reference.match_outlet("조선경제") is None, "모르는 매체는 이어 붙이지 않는다"
+        near = reference.near_miss("조선경제")
+        assert near is not None and near.name == "조선일보"
+
+    def test_department_suffix_still_resolves(self):
+        from app.ingest.reference import get_reference
+
+        outlet = get_reference().match_outlet("조선일보(산업부)")
+        assert outlet is not None and outlet.name == "조선일보"

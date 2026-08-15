@@ -8,12 +8,18 @@
 from __future__ import annotations
 
 import functools
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
 import yaml
 
 from .normalize import normalize_key
+
+# 매체명 뒤에 붙는 부서 꼬리표. `조선일보(산업부)` → `조선일보`
+_DEPT_SUFFIX_RE = re.compile(
+    r"(산업\d*부|테크부|it과학부|ict부|경제부|사회부|정치부|편집국|뉴스룸|본사|서울본사)$"
+)
 
 REFERENCE_DIR = Path(__file__).resolve().parents[2] / "data" / "reference"
 
@@ -82,16 +88,34 @@ class Reference:
             return None
         if key in self._outlet_by_key:
             return self._outlet_by_key[key]
-        # `조선일보(테크부)` 같은 꼬리표가 붙은 경우
-        candidates = [
-            outlet
-            for alias_key, outlet in self._outlet_by_key.items()
-            if len(alias_key) >= 2 and (key.startswith(alias_key) or alias_key.startswith(key))
-        ]
-        if candidates:
-            # 가장 긴 이름과 맞은 것을 고른다 (`한국` vs `한국경제`)
-            return max(candidates, key=lambda o: len(normalize_key(o.name)))
+
+        # `조선일보(산업부)` 처럼 부서 꼬리표가 붙은 경우만 떼어 내고 다시 본다.
+        stripped = _DEPT_SUFFIX_RE.sub("", key)
+        if stripped != key and stripped in self._outlet_by_key:
+            return self._outlet_by_key[stripped]
+
+        # 여기서 앞부분만 같다고 이어 붙이면 안 된다.
+        # `조선비즈`가 `조선일보`로, `연합뉴스TV`가 `연합뉴스`로 합쳐지는 사고가 실제로 났다.
+        # 모르는 매체는 새 매체로 등록하고 리포트에 남긴다. 잘못 합치는 것보다 훨씬 낫다.
         return None
+
+    def near_miss(self, raw: str) -> "OutletRef | None":
+        """사전에 없지만 등록된 매체와 앞부분이 겹치는 경우를 알려 준다.
+
+        `조선비즈` ↔ `조선일보` 처럼 헷갈리기 쉬운 매체를 사람이 눈으로 확인하도록
+        경고를 붙이기 위한 것이다. 매칭에는 쓰지 않는다.
+        """
+        key = normalize_key(raw)
+        if not key or key in self._outlet_by_key:
+            return None
+        best: OutletRef | None = None
+        best_len = 0
+        for alias_key, outlet in self._outlet_by_key.items():
+            if len(alias_key) < 2:
+                continue
+            if key.startswith(alias_key) and len(alias_key) > best_len:
+                best, best_len = outlet, len(alias_key)
+        return best
 
     def outlet_or_placeholder(self, raw: str) -> tuple[str, str, int, bool]:
         """(정식명, 분류, 정렬순서, 사전등록여부)."""
