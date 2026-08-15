@@ -82,10 +82,12 @@ def mask_phone(digits: str | None) -> str:
     return mask_phone_display(digits)
 
 
-def phone_spans(text: str | None, mask: bool = True) -> Markup:
+def phone_spans(text: str | None, mask: bool | None = None) -> Markup:
     """문장 속 전화번호를 클릭해서 보는 스팬으로 바꾼다. (변경 이력 등 목록 화면용)"""
     if not text:
         return Markup("")
+    if mask is None:
+        mask = get_settings().mask_phones_by_default
 
     def replace(match: re.Match[str]) -> str:
         raw = match.group(0)
