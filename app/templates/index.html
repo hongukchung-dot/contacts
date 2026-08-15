@@ -27,7 +27,7 @@
     </div>
     <p class="muted" style="margin:9px 0 0;">
       매체명을 누르면 출입기자 명단이 열립니다 · 번호를 누르면 표시되고, 한 번 더 누르면 복사됩니다 ·
-      최근 {{ highlight_days }}일 내 변경분은 <span style="background:var(--highlight);padding:0 4px;border-radius:3px;">음영</span> 표시
+      바뀐 내역은 <a href="/history">변경 이력</a>에서 확인할 수 있습니다
     </p>
   </div>
 </div>
@@ -61,7 +61,7 @@
             {% for slot in slots %}
             <td>
               {% for entry in row.cells.get(slot, []) %}
-                <span class="person {{ 'recent' if entry.is_recent }}">
+                <span class="person">
                   <span class="nm">{{ entry.name }}</span>
                   {% if entry.role_text and entry.role_text != slot %}<span class="rl">({{ entry.role_text }})</span>{% endif %}
                   {% if entry.concurrent %}<span class="rl">겸</span>{% endif %}

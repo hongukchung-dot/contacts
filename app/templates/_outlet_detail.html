@@ -20,7 +20,7 @@
         <tbody>
         {% for entry in desks %}
           <tr data-row="{{ entry.name }}	{{ entry.role_text or '' }}	{{ entry.phone_display }}">
-            <td class="{{ 'person recent' if entry.is_recent }}"><a href="/person/{{ entry.person_id }}">{{ entry.name }}</a></td>
+            <td><a href="/person/{{ entry.person_id }}">{{ entry.name }}</a></td>
             <td>{{ entry.role_text or '-' }}{% if entry.concurrent %} <span class="tag">겸직</span>{% endif %}{% if entry.locked %} <span class="lockmark" title="손으로 고친 항목">✎</span>{% endif %}</td>
             <td>{{ entry.dept or '-' }}</td>
             <td>{{ phone(entry, mask) }}{% if entry.email %}<br><a class="muted" href="mailto:{{ entry.email }}">{{ entry.email }}</a>{% endif %}{% if entry.memo %}<br><span class="muted" title="{{ entry.memo }}">📝 {{ entry.memo[:30] }}{{ '…' if entry.memo|length > 30 }}</span>{% endif %}</td>
@@ -43,7 +43,7 @@
           <tbody>
           {% for entry in entries %}
             <tr data-row="{{ entry.name }}	{{ entry.role_text or entry.rank }}	{{ entry.phone_display }}">
-              <td class="{{ 'person recent' if entry.is_recent }}"><a href="/person/{{ entry.person_id }}">{{ entry.name }}</a></td>
+              <td><a href="/person/{{ entry.person_id }}">{{ entry.name }}</a></td>
               <td>{{ entry.role_text or entry.rank }}{% if entry.locked %} <span class="lockmark" title="손으로 고친 항목">✎</span>{% endif %}</td>
               <td>{{ entry.note or '-' }}</td>
               <td>{{ phone(entry, mask) }}{% if entry.email %}<br><a class="muted" href="mailto:{{ entry.email }}">{{ entry.email }}</a>{% endif %}{% if entry.memo %}<br><span class="muted" title="{{ entry.memo }}">📝 {{ entry.memo[:30] }}{{ '…' if entry.memo|length > 30 }}</span>{% endif %}</td>
