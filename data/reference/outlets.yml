@@ -1,0 +1,188 @@
+# 매체 마스터 사전
+#
+# - name     : 정식 매체명 (화면 표기 기준)
+# - category : 종합지 / 경제지 / 방송 / 통신사 / 전문지 / 영자지
+# - order    : 화면 정렬 순서 (작을수록 위)
+# - aliases  : 원본 파일에 등장하는 표기 변형. 공백은 무시되므로 굳이 넣지 않아도 된다.
+#
+# 여기에 없는 매체가 파일에 나오면 자동으로 '미분류'로 등록되고
+# 관리자 화면에서 분류만 지정하면 된다. (파싱이 실패하지는 않는다)
+
+outlets:
+  # ── 종합지 ─────────────────────────────────────────────
+  - name: 조선일보
+    category: 종합지
+    order: 101
+    aliases: [조선]
+  - name: 동아일보
+    category: 종합지
+    order: 102
+    aliases: [동아]
+  - name: 중앙일보
+    category: 종합지
+    order: 103
+    aliases: [중앙]
+  - name: 한국일보
+    category: 종합지
+    order: 104
+    aliases: [한국]
+  - name: 한겨레
+    category: 종합지
+    order: 105
+    aliases: [한겨레신문]
+  - name: 경향신문
+    category: 종합지
+    order: 106
+    aliases: [경향]
+  - name: 국민일보
+    category: 종합지
+    order: 107
+    aliases: [국민]
+  - name: 서울신문
+    category: 종합지
+    order: 108
+    aliases: [서울]
+  - name: 세계일보
+    category: 종합지
+    order: 109
+    aliases: [세계]
+  - name: 문화일보
+    category: 종합지
+    order: 110
+    aliases: [문화]
+  - name: 내일신문
+    category: 종합지
+    order: 111
+    aliases: [내일]
+  - name: 아시아투데이
+    category: 종합지
+    order: 112
+    aliases: [아시아 투데이]
+
+  # ── 경제지 ─────────────────────────────────────────────
+  - name: 매일경제
+    category: 경제지
+    order: 201
+    aliases: [매경, 매일경제신문]
+  - name: 한국경제
+    category: 경제지
+    order: 202
+    aliases: [한경, 한국경제신문]
+  - name: 서울경제
+    category: 경제지
+    order: 203
+    aliases: [서경]
+  - name: 파이낸셜뉴스
+    category: 경제지
+    order: 204
+    aliases: [파이낸셜 뉴스, 파이낸셜, 파뉴]
+  - name: 머니투데이
+    category: 경제지
+    order: 205
+    aliases: [머니 투데이, 머투]
+  - name: 이데일리
+    category: 경제지
+    order: 206
+    aliases: []
+  - name: 헤럴드경제
+    category: 경제지
+    order: 207
+    aliases: [헤럴드 경제, 헤경]
+  - name: 아시아경제
+    category: 경제지
+    order: 208
+    aliases: [아시아 경제, 아경]
+  - name: 아주경제
+    category: 경제지
+    order: 209
+    aliases: [아주 경제]
+  - name: 이투데이
+    category: 경제지
+    order: 210
+    aliases: []
+  - name: 더벨
+    category: 경제지
+    order: 211
+    aliases: [thebell]
+
+  # ── 전문지 / 영자지 ────────────────────────────────────
+  - name: 전자신문
+    category: 전문지
+    order: 301
+    aliases: [etnews]
+  - name: 디지털타임스
+    category: 전문지
+    order: 302
+    aliases: [디지털 타임스, 디지털타임즈]
+  - name: 코리아타임스
+    category: 영자지
+    order: 311
+    aliases: [코리아 타임스, korea times]
+  - name: 코리아헤럴드
+    category: 영자지
+    order: 312
+    aliases: [코리아 헤럴드, korea herald]
+  - name: 중앙데일리
+    category: 영자지
+    order: 313
+    aliases: [코리아중앙데일리, korea joongang daily]
+
+  # ── 통신사 ─────────────────────────────────────────────
+  - name: 연합뉴스
+    category: 통신사
+    order: 401
+    aliases: [연합]
+  - name: 뉴스1
+    category: 통신사
+    order: 402
+    aliases: [뉴스원, news1]
+  - name: 뉴시스
+    category: 통신사
+    order: 403
+    aliases: [newsis]
+
+  # ── 방송 ───────────────────────────────────────────────
+  - name: KBS
+    category: 방송
+    order: 501
+    aliases: [케이비에스]
+  - name: MBC
+    category: 방송
+    order: 502
+    aliases: [문화방송]
+  - name: SBS
+    category: 방송
+    order: 503
+    aliases: []
+  - name: JTBC
+    category: 방송
+    order: 504
+    aliases: [제이티비씨]
+  - name: TV조선
+    category: 방송
+    order: 505
+    aliases: [티비조선, TV 조선]
+  - name: 채널A
+    category: 방송
+    order: 506
+    aliases: [채널에이, 채널 A]
+  - name: MBN
+    category: 방송
+    order: 507
+    aliases: [매일방송]
+  - name: YTN
+    category: 방송
+    order: 508
+    aliases: []
+  - name: 연합뉴스TV
+    category: 방송
+    order: 509
+    aliases: [연합TV, 연합뉴스 TV, 연합뉴스티비]
+  - name: CBS
+    category: 방송
+    order: 510
+    aliases: []
+  - name: SBS Biz
+    category: 방송
+    order: 511
+    aliases: [SBSBiz, SBS비즈, SBS CNBC]

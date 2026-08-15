@@ -1,14 +1,18 @@
 # ⚠️ 개인정보 보호: 주소록 원본 파일과 DB 산출물은 절대 커밋하지 않는다
-data/
+data/uploads/
+data/private/
+backups/
 *.xlsx
 *.xls
 *.docx
-*.csv
-*.sql
 *.dump
 *.sqlite
 *.sqlite3
 *.db
+
+# 단, 테스트용 합성 픽스처와 참조 사전은 커밋한다
+!tests/fixtures/**/*.xlsx
+!tests/fixtures/**/*.docx
 
 # 환경설정 / 비밀값
 .env
