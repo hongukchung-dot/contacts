@@ -108,6 +108,15 @@ def stage_file(
         record_count=len(result.records),
         parse_warnings=result.warnings or None,
         unparsed=result.unparsed or None,
+        sheet_stats=[
+            {
+                "sheet": title,
+                "kind": result.sheet_kinds.get(title, ""),
+                "count": result.sheet_counts.get(title, 0),
+            }
+            for title in result.sheet_kinds
+        ]
+        or None,
         uploaded_by_id=uploaded_by_id,
     )
     session.add(source_file)
@@ -202,14 +211,36 @@ def _build_changes(
             name_key=normalize_key(record.name),
             phone=record.phone,
             outlet_id=outlet.id,
-            by_phone=current["by_phone"],
             by_outlet_name=current["by_outlet_name"],
-            by_name=current["by_name"],
+            by_phone_name=current["by_phone_name"],
+            by_phone=current["by_phone"],
         )
 
         payload = _payload(record, outlet)
 
         if person_id is None:
+            if basis == "phone-name-mismatch":
+                owner = current["persons"].get(current["by_phone"].get(record.phone))
+                reason = (
+                    f"같은 번호가 {owner.name} 으로 등록돼 있습니다 — "
+                    "담당 교체이거나 번호 오기일 수 있어 확인이 필요합니다"
+                    if owner
+                    else "이미 쓰이고 있는 번호입니다 — 확인이 필요합니다"
+                )
+                _add(
+                    change_set,
+                    change_type=CONFLICT,
+                    outlet_name=outlet.name,
+                    person_name=record.name,
+                    field="assignment",
+                    old_value=format_phone(record.phone),
+                    new_value=_describe(record),
+                    reason=reason,
+                    auto_apply=False,
+                    outlet_id=outlet.id,
+                    payload=payload,
+                )
+                continue
             _add(
                 change_set,
                 change_type=NEW,
@@ -387,10 +418,12 @@ def _load_current(session: Session) -> dict:
     ).all()
 
     by_phone: dict[str, int] = {}
+    by_phone_name: dict[tuple[str, str], int] = {}
     by_name: dict[str, list[int]] = {}
     for person in persons.values():
         if person.phone:
             by_phone.setdefault(person.phone, person.id)
+            by_phone_name.setdefault((person.phone, person.name_key), person.id)
         by_name.setdefault(person.name_key, []).append(person.id)
 
     by_outlet_name: dict[tuple[int, str], int] = {}
@@ -411,6 +444,7 @@ def _load_current(session: Session) -> dict:
         "file_kind_by_id": file_kind_by_id,
         "assignments_by_person": assignments_by_person,
         "by_phone": by_phone,
+        "by_phone_name": by_phone_name,
         "by_name": by_name,
         "by_outlet_name": by_outlet_name,
     }
@@ -609,14 +643,28 @@ def _get_or_create_person(session: Session, change: Change) -> Person:
     name_key = normalize_key(change.person_name)
     phone = payload.get("phone")
     if phone:
-        existing = session.scalar(select(Person).where(Person.phone == phone))
+        existing = session.scalar(
+            select(Person).where(Person.phone == phone, Person.name_key == name_key)
+        )
         if existing:
             change.person_id = existing.id
             return existing
-    existing = session.scalar(select(Person).where(Person.name_key == name_key))
-    if existing:
-        change.person_id = existing.id
-        return existing
+    # 같은 매체에 같은 이름이 이미 있으면 그 사람이다.
+    outlet_id = change.outlet_id or payload.get("outlet_id")
+    if outlet_id:
+        existing = session.scalar(
+            select(Person)
+            .join(Assignment, Assignment.person_id == Person.id)
+            .where(
+                Person.name_key == name_key,
+                Assignment.outlet_id == outlet_id,
+                Assignment.valid_to.is_(None),
+            )
+            .limit(1)
+        )
+        if existing:
+            change.person_id = existing.id
+            return existing
 
     person = Person(
         name=_fit(change.person_name, 40),

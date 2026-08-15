@@ -77,6 +77,7 @@ MIGRATIONS = [
     "ALTER TABLE assignment ADD COLUMN IF NOT EXISTS edited_at timestamptz",
     "ALTER TABLE assignment ADD COLUMN IF NOT EXISTS edited_by_id integer "
     "REFERENCES app_user(id) ON DELETE SET NULL",
+    "ALTER TABLE source_file ADD COLUMN IF NOT EXISTS sheet_stats jsonb",
 ]
 
 

@@ -105,6 +105,43 @@ def build_reporter_list(path: Path) -> None:
     workbook.save(path)
 
 
+def build_mixed_workbook(path: Path) -> None:
+    """한 파일 안에 양식이 다른 탭이 섞여 있는 경우.
+
+    실제 파일도 탭마다 구조가 다르다. 파일 전체를 한 유형으로 단정하면
+    나머지 탭이 통째로 누락된다.
+    """
+    from openpyxl import Workbook
+
+    workbook = Workbook()
+
+    sheet = workbook.active
+    sheet.title = "데스크"
+    for row in [
+        ["□ 주요 데스크 현황(26.9.1)"],
+        [],
+        ["매체명", "편집국장", "산업부장", "경제부장"],
+        ["세계일보", "이 천 종 010-8727-1001", "이 강 은 010-3283-1002", "김 수 미 010-8790-1003"],
+    ]:
+        sheet.append(row)
+
+    sheet = workbook.create_sheet("출입기자")
+    for row in [
+        ["<출입기자> 현황"],
+        ["매체", "이름", "직급", "전화번호"],
+        ["세계", "김건호", "팀장", "010-2506-1004"],
+        ["", "반진욱", "기자", "010-4624-1005"],
+        ["아주경제", "이재호", "산업부장", "010-2480-1006"],
+    ]:
+        sheet.append(row)
+
+    sheet = workbook.create_sheet("메모")
+    sheet.append(["작성 시 유의사항"])
+    sheet.append(["매월 말일까지 갱신할 것"])
+
+    workbook.save(path)
+
+
 def build_combined_docx(path: Path) -> None:
     """(26-0803) 주요 데스크 출입기자 현황.docx 레이아웃."""
     import docx
@@ -157,6 +194,7 @@ def main() -> None:
     FIXTURE_DIR.mkdir(parents=True, exist_ok=True)
     build_desk_matrix(FIXTURE_DIR / "sample_desk_matrix.xlsx")
     build_reporter_list(FIXTURE_DIR / "sample_reporter_list.xlsx")
+    build_mixed_workbook(FIXTURE_DIR / "sample_mixed_sheets.xlsx")
     build_combined_docx(FIXTURE_DIR / "sample_combined.docx")
     print(f"픽스처 생성 완료 → {FIXTURE_DIR}")
 

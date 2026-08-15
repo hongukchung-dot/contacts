@@ -18,6 +18,23 @@
       <span>확인 필요 <b>{{ pending_count }}</b>건</span>
     </div>
 
+    {% if source.sheet_stats %}
+      <div class="tablewrap" style="margin-bottom:12px;">
+        <table style="max-width:520px;">
+          <thead><tr><th>탭(시트)</th><th style="width:120px;">인식한 구조</th><th style="width:80px;">읽은 인원</th></tr></thead>
+          <tbody>
+          {% for item in source.sheet_stats %}
+            <tr>
+              <td>{{ item.sheet }}</td>
+              <td>{{ {'desk_matrix':'데스크 표','reporter_list':'출입기자 목록','미인식':'구조 미인식'}.get(item.kind, item.kind) }}</td>
+              <td>{{ item.count }}명</td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% endif %}
+
     {% if source.unparsed %}
       <div class="notice warn">
         해석하지 못한 칸이 {{ source.unparsed|length }}개 있습니다. 원본 표기를 확인해 주세요.

@@ -1,7 +1,17 @@
 """인물 동일성 판정과 오타 의심 탐지.
 
-전화번호가 가장 안정적인 식별자이지만 원본에 번호 재사용/복붙 오류가 실제로 있으므로
-(같은 번호에 다른 사람이 적힌 사례가 확인됨) 단독 키로 쓰지 않고 우선순위 매칭을 한다.
+**매체를 옮겼다고 보려면 이름과 번호가 모두 같아야 한다.**
+이름만 같다고 같은 사람으로 묶으면 동명이인이 통째로 다른 회사로 옮겨간 것처럼
+기록된다. 출입기자 명단처럼 사람이 많은 파일에서는 이런 오판이 대량으로 생긴다.
+
+정리하면 이렇다.
+
+| 상황 | 판정 | 이유 |
+|------|------|------|
+| 같은 매체 + 이름 일치 | 같은 사람 | 한 매체 안에 동명이인은 드물고, 번호는 바뀔 수 있다 |
+| 이름 일치 + 번호 일치 | 같은 사람 (매체 이동) | 두 값이 모두 맞으면 이동으로 볼 만하다 |
+| 번호만 일치, 이름 다름 | **다른 사람** | 원본에 번호 재사용·복붙 오류가 실제로 있다 |
+| 이름만 일치, 번호 다름 | **다른 사람** | 동명이인 |
 """
 
 from __future__ import annotations
@@ -46,26 +56,26 @@ def match_person(
     name_key: str,
     phone: str | None,
     outlet_id: int,
-    by_phone: dict[str, int],
     by_outlet_name: dict[tuple[int, str], int],
-    by_name: dict[str, list[int]],
+    by_phone_name: dict[tuple[str, str], int],
+    by_phone: dict[str, int] | None = None,
 ) -> tuple[int | None, str]:
-    """(person_id, 매칭근거). 찾지 못하면 (None, 'new').
+    """(person_id, 매칭 근거). 찾지 못하면 (None, 'new').
 
-    우선순위
-      1) 번호 일치            — 가장 강한 근거
-      2) 같은 매체 + 이름 일치 — 번호가 바뀐 경우
-      3) 전체에서 이름이 유일  — 매체를 옮긴 경우
+    `by_phone` 은 판정에 쓰지 않고, "번호는 같은데 이름이 다른" 경우를
+    호출부에 알려 주기 위해서만 본다(`phone-name-mismatch`).
     """
-    if phone and phone in by_phone:
-        return by_phone[phone], "phone"
-
     key = (outlet_id, name_key)
     if key in by_outlet_name:
         return by_outlet_name[key], "outlet+name"
 
-    candidates = by_name.get(name_key) or []
-    if len(candidates) == 1:
-        return candidates[0], "name"
+    if phone:
+        moved = by_phone_name.get((phone, name_key))
+        if moved is not None:
+            return moved, "phone+name"
+        if by_phone and phone in by_phone:
+            # 번호는 이미 쓰이고 있는데 이름이 다르다.
+            # 담당 교체나 오기일 수 있으므로 같은 사람으로 묶지 않는다.
+            return None, "phone-name-mismatch"
 
     return None, "new"

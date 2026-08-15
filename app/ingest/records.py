@@ -49,6 +49,9 @@ class ParseResult:
     as_of: date | None = None
     file_kind: str = ""
     sheets: list[str] = field(default_factory=list)
+    # 시트별로 어떤 구조로 읽었고 몇 명을 얻었는지. 누락된 탭을 눈으로 확인하기 위한 것.
+    sheet_kinds: dict[str, str] = field(default_factory=dict)
+    sheet_counts: dict[str, int] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
     unparsed: list[str] = field(default_factory=list)
 

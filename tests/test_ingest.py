@@ -7,7 +7,7 @@ from datetime import date
 from pathlib import Path
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.models import (
     APPLIED,
@@ -402,3 +402,140 @@ class TestDuplicatePersonWithinFile:
         db_session.flush()
         removed = {c.person_name for c in change_set.changes if c.change_type == REMOVE}
         assert removed == set(), removed
+
+
+class TestPersonMatchingRules:
+    """이름만 같다고 같은 사람으로 묶으면 안 된다.
+
+    출입기자 명단처럼 사람이 많은 파일에서 동명이인이 통째로 다른 회사로
+    옮겨간 것처럼 기록되는 문제가 실제로 있었다.
+    """
+
+    def _put(self, session, outlet_name, name, phone, tmp_path, label, as_of):
+        """한 사람만 담은 출입기자 파일을 만들어 적재한다."""
+        from openpyxl import Workbook
+
+        path = tmp_path / f"{label}.xlsx"
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet.title = "종합지"
+        sheet.append(["매체", "이름", "직급", "전화번호"])
+        sheet.append([outlet_name, name, "기자", phone])
+        workbook.save(path)
+
+        change_set = stage_file(session, path, filename=f"{label}.xlsx", as_of_override=as_of)
+        session.flush()
+        return change_set
+
+    def test_same_name_different_phone_is_a_different_person(self, db_session, tmp_path):
+        """동명이인 — 매체를 옮긴 게 아니다."""
+        apply(db_session, self._put(
+            db_session, "조선일보", "김민수", "010-1111-0001", tmp_path, "a", date(2026, 6, 1)
+        ))
+        change_set = self._put(
+            db_session, "한국일보", "김민수", "010-2222-0002", tmp_path, "b", date(2026, 7, 1)
+        )
+        assert {c.change_type for c in change_set.changes} == {NEW}
+        apply(db_session, change_set)
+
+        people = db_session.scalars(select(Person).where(Person.name == "김민수")).all()
+        assert len(people) == 2, "이름만 같으면 서로 다른 사람이어야 한다"
+
+    def test_same_name_and_phone_is_a_move(self, db_session, tmp_path):
+        """이름·번호가 모두 같으면 매체를 옮긴 것으로 본다."""
+        apply(db_session, self._put(
+            db_session, "조선일보", "박지훈", "010-3333-0003", tmp_path, "a", date(2026, 6, 1)
+        ))
+        change_set = self._put(
+            db_session, "한국일보", "박지훈", "010-3333-0003", tmp_path, "b", date(2026, 7, 1)
+        )
+        apply(db_session, change_set)
+
+        people = db_session.scalars(select(Person).where(Person.name == "박지훈")).all()
+        assert len(people) == 1, "같은 사람으로 이어져야 한다"
+        outlets = {a.outlet.name for a in people[0].assignments}
+        assert outlets == {"조선일보", "한국일보"}
+
+    def test_same_outlet_same_name_is_the_same_person_even_if_phone_changed(
+        self, db_session, tmp_path
+    ):
+        """같은 매체 안에서는 번호가 바뀌어도 같은 사람으로 본다."""
+        apply(db_session, self._put(
+            db_session, "조선일보", "최수현", "010-4444-0004", tmp_path, "a", date(2026, 6, 1)
+        ))
+        change_set = self._put(
+            db_session, "조선일보", "최수현", "010-9999-0009", tmp_path, "b", date(2026, 7, 1)
+        )
+        apply(db_session, change_set)
+
+        people = db_session.scalars(select(Person).where(Person.name == "최수현")).all()
+        assert len(people) == 1
+        assert people[0].phone == "01099990009"
+
+    def test_same_phone_different_name_needs_review(self, db_session, tmp_path):
+        """번호는 같은데 이름이 다르면 담당 교체이거나 오기다. 자동 반영하지 않는다."""
+        apply(db_session, self._put(
+            db_session, "조선일보", "오로라", "010-4750-2723", tmp_path, "a", date(2026, 6, 1)
+        ))
+        change_set = self._put(
+            db_session, "조선일보", "최인준", "010-4750-2723", tmp_path, "b", date(2026, 7, 1)
+        )
+
+        conflicts = [c for c in change_set.changes if c.change_type == CONFLICT]
+        assert conflicts, "번호 충돌은 확인 대상으로 잡혀야 한다"
+        assert "오로라" in (conflicts[0].reason or "")
+        assert conflicts[0].auto_apply is False
+
+
+class TestRebuild:
+    """보관된 원본으로 데이터를 처음부터 다시 만든다."""
+
+    def test_rebuild_reproduces_the_same_result(self, db_session, monkeypatch, tmp_path):
+        from app.config import get_settings
+
+        settings = get_settings()
+        monkeypatch.setattr(settings, "upload_dir", tmp_path / "uploads")
+
+        for name in ("sample_reporter_list.xlsx", "sample_desk_matrix.xlsx"):
+            apply(db_session, load(db_session, name))
+
+        before_people = db_session.scalar(select(func.count()).select_from(Person))
+        before_seats = db_session.scalar(select(func.count()).select_from(Assignment))
+        assert before_people > 0
+
+        from tools.rebuild import collect_sources, reload_sources, wipe
+
+        sources = collect_sources(None)
+        assert len(sources) == 2, "보관본 두 개가 잡혀야 한다"
+        assert [s[2] for s in sources] == sorted(s[2] for s in sources), "기준일 오름차순"
+
+        wipe()
+        db_session.expire_all()
+        assert db_session.scalar(select(func.count()).select_from(Person)) == 0
+
+        reload_sources(sources, approve_all=False)
+        db_session.expire_all()
+
+        assert db_session.scalar(select(func.count()).select_from(Person)) == before_people
+        assert db_session.scalar(select(func.count()).select_from(Assignment)) == before_seats
+
+    def test_wipe_keeps_accounts_and_outlets(self, db_session, monkeypatch, tmp_path):
+        from app.config import get_settings
+        from app.models import AppUser, Outlet
+        from app.services.auth import hash_password
+
+        monkeypatch.setattr(get_settings(), "upload_dir", tmp_path / "uploads")
+        db_session.add(
+            AppUser(username="keepme", display_name="유지", password_hash=hash_password("x" * 12))
+        )
+        db_session.commit()
+
+        apply(db_session, load(db_session, "sample_reporter_list.xlsx"))
+
+        from tools.rebuild import wipe
+
+        wipe()
+        db_session.expire_all()
+
+        assert db_session.scalar(select(AppUser).where(AppUser.username == "keepme")) is not None
+        assert db_session.scalar(select(func.count()).select_from(Outlet)) > 0

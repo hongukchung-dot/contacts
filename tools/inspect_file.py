@@ -41,8 +41,16 @@ def report(path: Path, *, full: bool, reveal: bool) -> int:
 
     print(f"  유형   : {result.file_kind}")
     print(f"  기준일 : {result.as_of or '(찾지 못함)'}")
-    print(f"  시트/표: {', '.join(result.sheets)}")
     print(f"  인원   : {len(result.records)}명")
+    if result.sheet_kinds:
+        print("  탭별   :")
+        for title, kind in result.sheet_kinds.items():
+            label = {"desk_matrix": "데스크 표", "reporter_list": "출입기자 목록"}.get(kind, kind)
+            count = result.sheet_counts.get(title, 0)
+            mark = "  ← 확인 필요" if count == 0 else ""
+            print(f"           {title:20s} {label:12s} {count:4d}명{mark}")
+    else:
+        print(f"  시트/표: {', '.join(result.sheets)}")
 
     by_kind = Counter(r.kind for r in result.records)
     print(f"  구분   : " + ", ".join(f"{k} {v}명" for k, v in by_kind.items()))

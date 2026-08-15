@@ -185,16 +185,67 @@ def _is_header_row(values: list[str]) -> bool:
     return any(normalize_key(v) in {normalize_key(h) for h in _HEADER_HINTS} for v in values)
 
 
-# ── 1. 데스크 현황 xlsx (매트릭스) ──────────────────────────────────────────
+# ── xlsx: 시트마다 구조가 다를 수 있다 ─────────────────────────────────────
 
-def parse_desk_matrix(path: Path) -> ParseResult:
-    result = ParseResult(file_kind="desk_matrix")
+def detect_sheet_kind(sheet) -> str | None:
+    """시트 하나의 구조를 판별한다.
+
+    한 파일 안에서도 시트마다 양식이 다르다(어떤 탭은 매트릭스, 어떤 탭은 4열 목록).
+    파일 전체를 한 유형으로 단정하면 나머지 탭이 통째로 누락되므로 시트별로 본다.
+    """
+    for row in sheet.iter_rows(min_row=1, max_row=40):
+        values = _row_values(row)
+        if not any(values):
+            continue
+        if _build_reporter_map(values):
+            return "reporter_list"
+        if _is_header_row(values):
+            columns, _ = _build_column_map(values, get_reference())
+            if columns:
+                return "desk_matrix"
+    return None
+
+
+def parse_xlsx(path: Path) -> ParseResult:
+    """xlsx 를 시트별로 알맞은 파서에 태워 읽는다. 숨김 시트도 읽는다."""
+    result = ParseResult(file_kind="xlsx")
     result.as_of = as_of_from_filename(path.name)
 
     with open_workbook(path) as workbook:
+        # read_only 모드에서도 시트 목록은 숨김 여부와 무관하게 나온다.
         for sheet in workbook.worksheets:
-            _read_desk_sheet(sheet, result)
+            before = len(result.records)
+            kind = detect_sheet_kind(sheet)
+            if kind == "reporter_list":
+                _read_reporter_sheet(sheet, result)
+            elif kind == "desk_matrix":
+                _read_desk_sheet(sheet, result)
+            else:
+                result.sheets.append(sheet.title)
+                result.add_warning(
+                    f"[{sheet.title}] 표 구조를 찾지 못해 건너뜀 — "
+                    "머리글에 '매체명'과 직책 열, 또는 '매체/이름/직급/전화번호'가 있어야 합니다"
+                )
+                result.sheet_kinds[sheet.title] = "미인식"
+                result.sheet_counts[sheet.title] = 0
+                continue
+            result.sheet_kinds[sheet.title] = kind
+            result.sheet_counts[sheet.title] = len(result.records) - before
+
+    # 파일 전체의 대표 유형은 가장 많이 읽은 시트 유형으로 정한다.
+    if result.sheet_kinds:
+        tally: dict[str, int] = {}
+        for title, kind in result.sheet_kinds.items():
+            if kind in {"reporter_list", "desk_matrix"}:
+                tally[kind] = tally.get(kind, 0) + result.sheet_counts.get(title, 0)
+        if tally:
+            result.file_kind = max(tally, key=lambda k: tally[k])
     return result
+
+
+def parse_desk_matrix(path: Path) -> ParseResult:
+    """호환용 진입점. 실제로는 시트별 판별을 거친다."""
+    return parse_xlsx(path)
 
 
 def _read_desk_sheet(sheet, result: ParseResult) -> None:
@@ -289,13 +340,8 @@ _REPORTER_HEADERS = {
 
 
 def parse_reporter_list(path: Path) -> ParseResult:
-    result = ParseResult(file_kind="reporter_list")
-    result.as_of = as_of_from_filename(path.name)
-
-    with open_workbook(path) as workbook:
-        for sheet in workbook.worksheets:
-            _read_reporter_sheet(sheet, result)
-    return result
+    """호환용 진입점. 실제로는 시트별 판별을 거친다."""
+    return parse_xlsx(path)
 
 
 def _read_reporter_sheet(sheet, result: ParseResult) -> None:
@@ -480,14 +526,9 @@ def detect_kind(path: Path) -> str:
 
     with open_workbook(path) as workbook:
         for sheet in workbook.worksheets:
-            for row in sheet.iter_rows(min_row=1, max_row=30):
-                values = _row_values(row)
-                if _build_reporter_map(values):
-                    return "reporter_list"
-                if _is_header_row(values):
-                    columns, _ = _build_column_map(values, get_reference())
-                    if len(columns) >= 3:
-                        return "desk_matrix"
+            kind = detect_sheet_kind(sheet)
+            if kind:
+                return kind
     raise ValueError(
         "파일 구조를 인식하지 못했습니다. "
         "'매체명'과 직책 열이 있는 데스크 표, 또는 '매체/이름/직급/전화번호' 열이 있는 "
@@ -496,17 +537,18 @@ def detect_kind(path: Path) -> str:
 
 
 PARSERS = {
-    "desk_matrix": parse_desk_matrix,
-    "reporter_list": parse_reporter_list,
+    "desk_matrix": parse_xlsx,
+    "reporter_list": parse_xlsx,
     "combined_docx": parse_combined_docx,
 }
 
 
 def detect_and_parse(path: str | Path) -> ParseResult:
     path = Path(path)
-    kind = detect_kind(path)
+    kind = detect_kind(path)   # 지원하지 않는 파일이면 여기서 걸러진다
     result = PARSERS[kind](path)
-    result.file_kind = kind
+    if kind == "combined_docx":
+        result.file_kind = kind
     if result.as_of is None:
         result.add_warning("기준일을 찾지 못했습니다. 업로드 화면에서 직접 지정해 주세요.")
     return result

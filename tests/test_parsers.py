@@ -249,3 +249,38 @@ class TestSecuredWorkbook:
         assert [r.name for r in secured_result.records] == [r.name for r in clean.records]
         assert [r.phone for r in secured_result.records] == [r.phone for r in clean.records]
         assert secured_result.unparsed == []
+
+
+class TestMixedSheets:
+    """한 파일에 양식이 다른 탭이 섞여 있어도 모두 읽어야 한다."""
+
+    @pytest.fixture(scope="class")
+    def result(self):
+        return detect_and_parse(FIXTURES / "sample_mixed_sheets.xlsx")
+
+    def test_every_sheet_is_visited(self, result):
+        assert set(result.sheet_kinds) == {"데스크", "출입기자", "메모"}
+
+    def test_each_sheet_gets_its_own_parser(self, result):
+        assert result.sheet_kinds["데스크"] == "desk_matrix"
+        assert result.sheet_kinds["출입기자"] == "reporter_list"
+        assert result.sheet_kinds["메모"] == "미인식"
+
+    def test_desk_sheet_records(self, result):
+        assert find(result.records, "이강은")[0].role_slot == "산업부장"
+        assert find(result.records, "이천종")[0].kind == DESK
+
+    def test_reporter_sheet_records(self, result):
+        """예전 로직이라면 이 탭이 통째로 빠졌을 것이다."""
+        assert find(result.records, "김건호")[0].kind == REPORTER
+        assert find(result.records, "김건호")[0].outlet == "세계일보"
+        assert find(result.records, "이재호")[0].outlet == "아주경제"
+
+    def test_unrecognised_sheet_is_reported_not_silently_dropped(self, result):
+        assert result.sheet_counts["메모"] == 0
+        assert any("메모" in w and "건너뜀" in w for w in result.warnings)
+
+    def test_sheet_counts_add_up(self, result):
+        assert sum(result.sheet_counts.values()) == len(result.records)
+        assert result.sheet_counts["데스크"] == 3
+        assert result.sheet_counts["출입기자"] == 3

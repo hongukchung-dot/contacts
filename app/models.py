@@ -185,6 +185,8 @@ class SourceFile(Base):
     record_count: Mapped[int] = mapped_column(Integer, default=0)
     parse_warnings: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     unparsed: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    # 시트(탭)별로 어떤 구조로 읽었고 몇 명을 얻었는지. 누락된 탭 확인용.
+    sheet_stats: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     uploaded_by_id: Mapped[int | None] = mapped_column(
         ForeignKey("app_user.id", ondelete="SET NULL"), nullable=True
     )
