@@ -297,6 +297,9 @@ class AppUser(Base, TimestampMixin):
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     must_change_password: Mapped[bool] = mapped_column(Boolean, default=False)
+    # 2단계 인증(TOTP). REQUIRE_TOTP=true 일 때 로그인에 사용된다.
+    totp_secret: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    totp_confirmed: Mapped[bool] = mapped_column(Boolean, default=False)
 
     @property
     def can_edit(self) -> bool:

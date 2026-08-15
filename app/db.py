@@ -85,6 +85,9 @@ MIGRATIONS = [
     "CREATE INDEX IF NOT EXISTS ix_person_email ON person (email)",
     # 분류 이름 변경: '미분류' → '기타' (여러 번 실행해도 안전)
     "UPDATE outlet SET category = '기타' WHERE category = '미분류'",
+    # 2단계 인증(TOTP)
+    "ALTER TABLE app_user ADD COLUMN IF NOT EXISTS totp_secret varchar(64)",
+    "ALTER TABLE app_user ADD COLUMN IF NOT EXISTS totp_confirmed boolean NOT NULL DEFAULT false",
 ]
 
 

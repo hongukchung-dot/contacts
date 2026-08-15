@@ -163,6 +163,85 @@ class TestFullCycle:
         assert "login" in page.text
 
 
+class TestLoginLockout:
+    """무차별 대입 방어: 짧은 시간에 실패가 몰리면 잠근다."""
+
+    def test_lockout_after_repeated_failures(self, client, admin):
+        from app.config import get_settings
+
+        limit = get_settings().login_fail_limit
+        for _ in range(limit):
+            response = client.post(
+                "/login", data={"username": "tester", "password": "wrong-pass", "next": "/"}
+            )
+            assert response.status_code == 401
+        # 한도를 넘기면 맞는 비밀번호로도 잠시 막힌다
+        response = client.post(
+            "/login", data={"username": "tester", "password": "verysecret123", "next": "/"}
+        )
+        assert response.status_code == 429
+        assert "너무 많습니다" in response.text
+
+
+class TestTotpLogin:
+    """REQUIRE_TOTP=true 일 때의 2단계 인증 흐름 (기본값은 꺼져 있다)."""
+
+    @pytest.fixture()
+    def totp_on(self):
+        from app.config import get_settings
+
+        settings = get_settings()
+        settings.require_totp = True
+        yield
+        settings.require_totp = False
+
+    def test_password_alone_does_not_issue_session(self, client, admin, totp_on):
+        response = client.post(
+            "/login", data={"username": "tester", "password": "verysecret123", "next": "/"}
+        )
+        assert response.status_code == 200
+        assert "2단계 인증" in response.text
+        assert "contacts_session" not in response.cookies
+        # 세션 없이 메인 접근 → 로그인으로 돌려보냄
+        assert client.get("/").status_code == 303
+
+    def test_enroll_and_login_with_code(self, client, admin, totp_on, db_session):
+        from app.models import AppUser
+        from app.services import totp as totp_service
+
+        page = client.post(
+            "/login", data={"username": "tester", "password": "verysecret123", "next": "/"}
+        )
+        token = re.search(r'name="token" value="([^"]+)"', page.text).group(1)
+        assert "QR" in page.text  # 첫 로그인은 등록 화면
+
+        user = db_session.get(AppUser, admin.id)
+        db_session.refresh(user)
+        code = totp_service.code_at(user.totp_secret)
+        response = client.post("/login/otp", data={"token": token, "code": code, "next": "/"})
+        assert response.status_code == 303
+        assert client.get("/").status_code == 200
+
+        db_session.refresh(user)
+        assert user.totp_confirmed is True
+
+    def test_wrong_code_is_rejected(self, client, admin, totp_on):
+        page = client.post(
+            "/login", data={"username": "tester", "password": "verysecret123", "next": "/"}
+        )
+        token = re.search(r'name="token" value="([^"]+)"', page.text).group(1)
+        response = client.post("/login/otp", data={"token": token, "code": "000000", "next": "/"})
+        assert response.status_code == 401
+        assert "올바르지 않습니다" in response.text
+        assert client.get("/").status_code == 303
+
+    def test_totp_off_keeps_old_flow(self, client, admin):
+        response = client.post(
+            "/login", data={"username": "tester", "password": "verysecret123", "next": "/"}
+        )
+        assert response.status_code == 303  # OTP 단계 없이 바로 로그인
+
+
 class TestReporterOnlyOutlets:
     """데스크 없이 출입기자만 있는 매체도 매트릭스에 행으로 나와야 한다."""
 

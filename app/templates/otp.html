@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>2단계 인증 · 언론사 주소록</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<main style="max-width:380px;margin:8vh auto;">
+  <div class="panel">
+    <h2>2단계 인증</h2>
+    <div class="body">
+      {% if error %}<div class="notice error">{{ error }}</div>{% endif %}
+
+      {% if enrolling %}
+        <p>처음 로그인이므로 OTP 앱을 등록합니다.</p>
+        <ol class="muted" style="padding-left:18px;margin:8px 0 12px;">
+          <li>휴대폰에 <b>Google Authenticator</b> 등 OTP 앱을 설치</li>
+          <li>앱에서 아래 QR 코드를 스캔</li>
+          <li>앱에 표시된 6자리 코드를 입력</li>
+        </ol>
+        {% if qr %}
+          <p style="text-align:center;margin:12px 0;">
+            <img src="{{ qr }}" alt="OTP 등록 QR" style="width:180px;height:180px;background:#fff;padding:8px;border-radius:8px;">
+          </p>
+        {% endif %}
+        <p class="muted" style="word-break:break-all;">
+          QR을 못 읽으면 키를 직접 입력하세요: <code>{{ secret }}</code>
+        </p>
+      {% else %}
+        <p>OTP 앱에 표시된 6자리 코드를 입력하세요.</p>
+      {% endif %}
+
+      <form method="post" action="/login/otp">
+        <input type="hidden" name="next" value="{{ next }}">
+        <input type="hidden" name="token" value="{{ token }}">
+        <label class="muted" for="code">인증 코드</label>
+        <input id="code" name="code" required autofocus inputmode="numeric" pattern="[0-9]*"
+               maxlength="6" autocomplete="one-time-code" placeholder="000000"
+               style="width:100%;padding:8px;margin:4px 0 16px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);font-size:20px;letter-spacing:6px;text-align:center;">
+        <button class="btn primary" type="submit" style="width:100%;">확인</button>
+      </form>
+      <p class="muted" style="margin-top:14px;"><a href="/login">← 처음부터 다시 로그인</a></p>
+    </div>
+  </div>
+</main>
+</body>
+</html>

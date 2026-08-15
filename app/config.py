@@ -33,6 +33,13 @@ class Settings:
         self.admin_username: str = os.getenv("ADMIN_USERNAME", "admin")
         self.admin_password: str = os.getenv("ADMIN_PASSWORD", "")
 
+        # 2단계 인증(TOTP). 켜면 로그인 시 OTP 앱 코드를 함께 요구한다.
+        # 처음 로그인하는 사용자에게는 QR 등록 화면이 먼저 나온다.
+        self.require_totp: bool = _bool("REQUIRE_TOTP", False)
+        # 로그인 실패 잠금: 같은 계정/IP 로 window 분 안에 limit 번 틀리면 잠시 막는다.
+        self.login_fail_limit: int = int(os.getenv("LOGIN_FAIL_LIMIT", "5"))
+        self.login_fail_window_min: int = int(os.getenv("LOGIN_FAIL_WINDOW_MIN", "10"))
+
     def validate(self) -> None:
         if not self.secret_key or len(self.secret_key) < 32:
             raise RuntimeError(

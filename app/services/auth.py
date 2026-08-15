@@ -58,10 +58,59 @@ def authenticate(session: Session, username: str, password: str) -> AppUser | No
     return user
 
 
+# ── 로그인 실패 잠금 ────────────────────────────────────────────────────────
+
+def login_locked(session: Session, username: str, ip: str | None) -> bool:
+    """짧은 시간에 실패가 몰리면 True. 무차별 대입을 막는다.
+
+    같은 계정을 노리는 시도(IP를 바꿔 가며)와 같은 IP 에서 계정을 바꿔 가며
+    두드리는 시도를 모두 잡기 위해 계정·IP 어느 쪽이든 한도를 넘으면 잠근다.
+    """
+    from datetime import timedelta
+
+    from sqlalchemy import func, or_, select as sa_select
+
+    settings = get_settings()
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=settings.login_fail_window_min)
+    targets = [AuditLog.detail == f"id={username.strip()}"]
+    if ip:
+        targets.append(AuditLog.ip == ip)
+    failures = session.scalar(
+        sa_select(func.count())
+        .select_from(AuditLog)
+        .where(
+            AuditLog.action == "login_failed",
+            AuditLog.created_at >= cutoff,
+            or_(*targets),
+        )
+    )
+    return (failures or 0) >= settings.login_fail_limit
+
+
 # ── 세션 쿠키 ───────────────────────────────────────────────────────────────
 
 def _serializer() -> URLSafeTimedSerializer:
     return URLSafeTimedSerializer(get_settings().secret_key, salt="contacts-session")
+
+
+# 비밀번호는 맞았지만 OTP 확인이 남은 상태를 잇는 단기 토큰 (5분)
+_PENDING_MAX_AGE = 300
+
+
+def _pending_serializer() -> URLSafeTimedSerializer:
+    return URLSafeTimedSerializer(get_settings().secret_key, salt="contacts-otp-pending")
+
+
+def issue_pending(user: AppUser) -> str:
+    return _pending_serializer().dumps({"uid": user.id})
+
+
+def read_pending(token: str) -> int | None:
+    try:
+        data = _pending_serializer().loads(token, max_age=_PENDING_MAX_AGE)
+    except (BadSignature, SignatureExpired):
+        return None
+    return data.get("uid")
 
 
 def issue_session(user: AppUser) -> str:

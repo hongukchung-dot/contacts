@@ -45,11 +45,15 @@ from .services.auth import (
     authenticate,
     generate_password,
     hash_password,
+    issue_pending,
     issue_session,
     log_action,
+    login_locked,
+    read_pending,
     read_session,
     verify_password,
 )
+from .services import totp as totp_service
 from .services.edit import (
     EditError,
     close_assignment,
@@ -181,27 +185,36 @@ async def login_form(request: Request, next: str = "/") -> Response:
     return templates.TemplateResponse(request, "login.html", {"next": next, "user": None})
 
 
-@app.post("/login")
-async def login(
-    request: Request,
-    username: str = Form(...),
-    password: str = Form(...),
-    next: str = Form("/"),
-    db: Session = Depends(get_db),
-) -> Response:
-    user = authenticate(db, username, password)
-    if user is None:
-        log_action(db, None, "login_failed", f"id={username}", request.client.host if request.client else None)
-        db.commit()
-        return templates.TemplateResponse(
-            request,
-            "login.html",
-            {"error": "아이디 또는 비밀번호가 올바르지 않습니다.", "next": next, "user": None},
-            status_code=401,
-        )
-    log_action(db, user, "login", None, request.client.host if request.client else None)
-    db.commit()
+def _client_ip(request: Request) -> str | None:
+    return request.client.host if request.client else None
 
+
+def _login_rejected(request: Request, db: Session, username: str, next: str) -> Response:
+    log_action(db, None, "login_failed", f"id={username}", _client_ip(request))
+    db.commit()
+    return templates.TemplateResponse(
+        request,
+        "login.html",
+        {"error": "아이디 또는 비밀번호가 올바르지 않습니다.", "next": next, "user": None},
+        status_code=401,
+    )
+
+
+def _login_throttled(request: Request, next: str) -> Response:
+    minutes = get_settings().login_fail_window_min
+    return templates.TemplateResponse(
+        request,
+        "login.html",
+        {
+            "error": f"로그인 시도가 너무 많습니다. {minutes}분 뒤에 다시 시도해 주세요.",
+            "next": next,
+            "user": None,
+        },
+        status_code=429,
+    )
+
+
+def _issue_login(request: Request, user: AppUser, next: str) -> Response:
     target = next if next.startswith("/") else "/"
     response = RedirectResponse(target, status_code=303)
     settings = get_settings()
@@ -214,6 +227,85 @@ async def login(
         secure=request.url.scheme == "https",
     )
     return response
+
+
+def _otp_form(request: Request, user: AppUser, next: str, *, error: str | None = None) -> Response:
+    """OTP 확인 화면. 아직 등록 전이면 QR 등록 화면을 먼저 보여 준다."""
+    enrolling = not user.totp_confirmed
+    context = {
+        "user": None,
+        "next": next,
+        "token": issue_pending(user),
+        "enrolling": enrolling,
+        "error": error,
+    }
+    if enrolling:
+        context["secret"] = user.totp_secret
+        otpauth = totp_service.provisioning_uri(user.totp_secret, user.username)
+        try:
+            import segno
+
+            context["qr"] = segno.make(otpauth).svg_data_uri(scale=4)
+        except ImportError:
+            # QR 라이브러리가 없어도 키 직접 입력으로 등록할 수 있다.
+            context["qr"] = None
+    return templates.TemplateResponse(request, "otp.html", context, status_code=401 if error else 200)
+
+
+@app.post("/login")
+async def login(
+    request: Request,
+    username: str = Form(...),
+    password: str = Form(...),
+    next: str = Form("/"),
+    db: Session = Depends(get_db),
+) -> Response:
+    if login_locked(db, username, _client_ip(request)):
+        return _login_throttled(request, next)
+
+    user = authenticate(db, username, password)
+    if user is None:
+        return _login_rejected(request, db, username, next)
+
+    if get_settings().require_totp:
+        # 비밀번호는 맞음 — OTP 확인 단계로 넘어간다. 세션은 아직 발급하지 않는다.
+        if not user.totp_secret:
+            user.totp_secret = totp_service.generate_secret()
+        db.commit()
+        return _otp_form(request, user, next)
+
+    log_action(db, user, "login", None, _client_ip(request))
+    db.commit()
+    return _issue_login(request, user, next)
+
+
+@app.post("/login/otp")
+async def login_otp(
+    request: Request,
+    token: str = Form(...),
+    code: str = Form(...),
+    next: str = Form("/"),
+    db: Session = Depends(get_db),
+) -> Response:
+    user_id = read_pending(token)
+    user = db.get(AppUser, user_id) if user_id is not None else None
+    if user is None or not user.active:
+        return RedirectResponse("/login", status_code=303)
+
+    if login_locked(db, user.username, _client_ip(request)):
+        return _login_throttled(request, next)
+
+    if not user.totp_secret or not totp_service.verify(user.totp_secret, code):
+        log_action(db, None, "login_failed", f"id={user.username}", _client_ip(request))
+        db.commit()
+        return _otp_form(request, user, next, error="인증 코드가 올바르지 않습니다.")
+
+    if not user.totp_confirmed:
+        user.totp_confirmed = True
+        log_action(db, user, "totp_enrolled", None, _client_ip(request))
+    log_action(db, user, "login", None, _client_ip(request))
+    db.commit()
+    return _issue_login(request, user, next)
 
 
 @app.get("/logout")
