@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 
 from .config import BASE_DIR, get_settings
 from .db import get_db
-from .ingest.normalize import format_phone
+from .ingest.normalize import format_phone, mask_phone_display
 from .ingest.reference import get_reference
 from .models import (
     APPLIED,
@@ -79,11 +79,7 @@ templates.env.globals["format_phone"] = format_phone
 
 def mask_phone(digits: str | None) -> str:
     """가운데 자리를 가린 표기. 어깨너머·화면 캡처 노출을 줄이기 위한 것이다."""
-    formatted = format_phone(digits)
-    if not formatted:
-        return "—"
-    head, mid, tail = formatted.split("-")
-    return f"{head}-{'●' * len(mid)}-{tail}"
+    return mask_phone_display(digits)
 
 
 def phone_spans(text: str | None, mask: bool = True) -> Markup:

@@ -76,7 +76,7 @@ def is_empty(value: object) -> bool:
 
 
 def normalize_phone(raw: str) -> tuple[str | None, list[str]]:
-    """전화번호를 숫자 11자리로 정규화한다.
+    """전화번호를 숫자열로 정규화한다. 휴대폰 외에 유선·070·대표번호도 받는다.
 
     Returns: (정규화된 번호 또는 None, 경고 목록)
     """
@@ -85,31 +85,60 @@ def normalize_phone(raw: str) -> tuple[str | None, list[str]]:
     if not digits:
         return None, warnings
 
-    if len(digits) == 10 and digits.startswith("1"):
-        # `10-4633-3750` 처럼 맨 앞 0이 빠진 표기. 원본에 실제로 존재한다.
+    if len(digits) == 10 and digits.startswith("1") and digits[1] in "016789":
+        # `10-4633-3750` 처럼 맨 앞 0이 빠진 휴대폰 표기. 원본에 실제로 존재한다.
         digits = "0" + digits
         warnings.append("앞자리 0 누락 추정 → 0을 보정함")
 
-    if len(digits) == 10 and digits.startswith("01"):
-        # 011/016/017/018/019 구형 번호
+    if digits.startswith("01") and len(digits) in (10, 11):
+        # 010 열한 자리 + 011/016/017/018/019 구형 열 자리
+        return digits, warnings
+    if digits.startswith("02") and len(digits) in (9, 10):
+        # 서울 유선 (02-XXX-XXXX / 02-XXXX-XXXX)
+        return digits, warnings
+    if digits.startswith("0") and len(digits) in (10, 11, 12):
+        # 지역 유선(031~064)·070 인터넷전화·0508 안심번호 등
+        return digits, warnings
+    if len(digits) == 8 and digits.startswith("1"):
+        # 1588-1234 같은 대표번호
         return digits, warnings
 
-    if len(digits) != 11 or not digits.startswith("01"):
-        warnings.append(f"휴대폰 번호 형식이 아님: {raw!r}")
-        return None, warnings
-
-    return digits, warnings
+    warnings.append(f"전화번호 형식이 아님: {raw!r}")
+    return None, warnings
 
 
 def format_phone(digits: str | None) -> str:
-    """저장된 숫자열을 화면 표기(010-1234-5678)로 되돌린다."""
+    """저장된 숫자열을 화면 표기(010-1234-5678, 02-393-0188 …)로 되돌린다."""
     if not digits:
         return ""
+    if digits.startswith("02"):
+        if len(digits) == 9:
+            return f"02-{digits[2:5]}-{digits[5:]}"
+        if len(digits) == 10:
+            return f"02-{digits[2:6]}-{digits[6:]}"
+    if len(digits) == 12:
+        return f"{digits[:4]}-{digits[4:8]}-{digits[8:]}"
     if len(digits) == 11:
         return f"{digits[:3]}-{digits[3:7]}-{digits[7:]}"
     if len(digits) == 10:
         return f"{digits[:3]}-{digits[3:6]}-{digits[6:]}"
+    if len(digits) == 8:
+        return f"{digits[:4]}-{digits[4:]}"
     return digits
+
+
+def mask_phone_display(digits: str | None, *, mask_char: str = "●", empty: str = "—") -> str:
+    """가운데 자리를 가린 표기 (010-●●●●-5678, 02-●●●-0188, ●●●●-1234)."""
+    formatted = format_phone(digits)
+    if not formatted:
+        return empty
+    parts = formatted.split("-")
+    if len(parts) >= 3:
+        middle = [mask_char * len(part) for part in parts[1:-1]]
+        return "-".join([parts[0], *middle, parts[-1]])
+    if len(parts) == 2:
+        return f"{mask_char * len(parts[0])}-{parts[1]}"
+    return formatted
 
 
 def normalize_name(raw: str) -> str:

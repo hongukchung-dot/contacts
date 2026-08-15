@@ -16,18 +16,16 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.ingest.normalize import format_phone  # noqa: E402
+from app.ingest.normalize import format_phone, mask_phone_display  # noqa: E402
 from app.ingest.parsers import detect_and_parse  # noqa: E402
 
 
 def mask(phone: str | None, reveal: bool) -> str:
     if not phone:
         return "(번호없음)"
-    formatted = format_phone(phone)
     if reveal:
-        return formatted
-    head, mid, tail = formatted.split("-")
-    return f"{head}-{'*' * len(mid)}-{tail}"
+        return format_phone(phone)
+    return mask_phone_display(phone, mask_char="*", empty="(번호없음)")
 
 
 def report(path: Path, *, full: bool, reveal: bool) -> int:

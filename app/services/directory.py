@@ -9,7 +9,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, joinedload
 
 from ..config import get_settings
-from ..ingest.normalize import format_phone, role_display
+from ..ingest.normalize import format_phone, mask_phone_display, role_display
 from ..ingest.reference import get_reference
 from ..models import (
     APPLIED,
@@ -53,11 +53,7 @@ class Entry:
 
     @property
     def phone_masked(self) -> str:
-        if not self.phone:
-            return "—"
-        formatted = format_phone(self.phone)
-        head, mid, tail = formatted.split("-")
-        return f"{head}-{'●' * len(mid)}-{tail}"
+        return mask_phone_display(self.phone)
 
 
 @dataclass

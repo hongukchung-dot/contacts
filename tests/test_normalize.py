@@ -38,6 +38,32 @@ class TestPhone:
     def test_format_roundtrip(self):
         assert format_phone("01053850000") == "010-5385-0000"
 
+    def test_seoul_landline(self):
+        """02 유선번호도 오류 없이 받는다 (주간지 편집국 대표번호 등)."""
+        digits, warnings = normalize_phone("02-393-0188")
+        assert digits == "023930188" and not warnings
+        assert format_phone(digits) == "02-393-0188"
+        digits, _ = normalize_phone("02-1234-5678")
+        assert format_phone(digits) == "02-1234-5678"
+
+    def test_area_landline_and_voip(self):
+        assert normalize_phone("031-123-4567")[0] == "0311234567"
+        assert normalize_phone("070-8123-4567")[0] == "07081234567"
+        assert format_phone("07081234567") == "070-8123-4567"
+
+    def test_representative_number(self):
+        digits, warnings = normalize_phone("1588-1234")
+        assert digits == "15881234" and not warnings
+        assert format_phone(digits) == "1588-1234"
+
+    def test_mask_handles_all_shapes(self):
+        from app.ingest.normalize import mask_phone_display
+
+        assert mask_phone_display("01053850000") == "010-●●●●-0000"
+        assert mask_phone_display("023930188") == "02-●●●-0188"
+        assert mask_phone_display("15881234") == "●●●●-1234"
+        assert mask_phone_display(None) == "—"
+
 
 class TestName:
     def test_spaced_name(self):
