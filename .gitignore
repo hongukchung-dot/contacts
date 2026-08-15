@@ -1,0 +1,36 @@
+# ⚠️ 개인정보 보호: 주소록 원본 파일과 DB 산출물은 절대 커밋하지 않는다
+data/
+*.xlsx
+*.xls
+*.docx
+*.csv
+*.sql
+*.dump
+*.sqlite
+*.sqlite3
+*.db
+
+# 환경설정 / 비밀값
+.env
+.env.*
+!.env.example
+secrets/
+*.pem
+*.key
+service_account*.json
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Node
+node_modules/
+
+# 기타
+.DS_Store
+*.log
