@@ -69,9 +69,22 @@ TRIGRAM_STATEMENTS = [
 ]
 
 
+# 이미 만들어진 DB에도 안전하게 컬럼을 더한다. 여러 번 실행해도 문제없다.
+# (Alembic 을 쓸 만큼 스키마가 복잡하지 않아 멱등 DDL 로 관리한다)
+MIGRATIONS = [
+    "ALTER TABLE change_set ADD COLUMN IF NOT EXISTS is_initial boolean NOT NULL DEFAULT false",
+    "ALTER TABLE assignment ADD COLUMN IF NOT EXISTS locked boolean NOT NULL DEFAULT false",
+    "ALTER TABLE assignment ADD COLUMN IF NOT EXISTS edited_at timestamptz",
+    "ALTER TABLE assignment ADD COLUMN IF NOT EXISTS edited_by_id integer "
+    "REFERENCES app_user(id) ON DELETE SET NULL",
+]
+
+
 def create_schema() -> None:
     engine = get_engine()
     Base.metadata.create_all(engine)
     with engine.begin() as connection:
+        for statement in MIGRATIONS:
+            connection.execute(text(statement))
         for statement in TRIGRAM_STATEMENTS:
             connection.execute(text(statement))

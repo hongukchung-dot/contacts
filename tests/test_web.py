@@ -243,3 +243,135 @@ class TestHighlighting:
         load("sample_combined.docx")
         body = auth.get("/").text.split("<tbody>", 1)[1]
         assert "person recent" in body
+
+
+class TestEditThroughWeb:
+    """화면에서 실제로 눌러 고치는 흐름."""
+
+    @pytest.fixture()
+    def loaded(self, auth):
+        response = upload(auth, "sample_desk_matrix.xlsx")
+        review_url = response.headers["location"]
+        page = auth.get(review_url)
+        ids = re.findall(r'name="approve" value="(\d+)"', page.text)
+        auth.post(f"{review_url}/apply", data={"approve": ids})
+        return auth
+
+    def _first_assignment_id(self, client) -> str:
+        page = client.get("/")
+        outlet_id = re.search(r'data-outlet="(\d+)"', page.text).group(1)
+        modal = client.get(f"/outlet/{outlet_id}")
+        return re.search(r"/assignment/(\d+)/edit", modal.text).group(1)
+
+    def test_edit_button_appears_for_editors(self, loaded):
+        page = loaded.get("/")
+        outlet_id = re.search(r'data-outlet="(\d+)"', page.text).group(1)
+        modal = loaded.get(f"/outlet/{outlet_id}")
+        assert "수정" in modal.text
+        assert "+ 항목 추가" in modal.text
+
+    def test_edit_form_renders(self, loaded):
+        assignment_id = self._first_assignment_id(loaded)
+        form = loaded.get(f"/assignment/{assignment_id}/edit")
+        assert form.status_code == 200
+        assert "항목 수정" in form.text
+        assert "잘못된 항목 삭제" in form.text
+
+    def test_saving_changes_the_matrix(self, loaded):
+        assignment_id = self._first_assignment_id(loaded)
+        response = loaded.post(
+            f"/assignment/{assignment_id}/edit",
+            data={
+                "name": "고친이름",
+                "phone": "010-1234-5678",
+                "kind": "desk",
+                "role_slot": "편집국장",
+                "role_label": "편집국장",
+                "dept": "",
+                "note": "",
+            },
+        )
+        assert response.status_code == 200
+        assert response.headers.get("X-Contacts-Edited")
+        assert "고친이름" in loaded.get("/").text
+
+    def test_bad_phone_shows_the_form_again(self, loaded):
+        assignment_id = self._first_assignment_id(loaded)
+        response = loaded.post(
+            f"/assignment/{assignment_id}/edit",
+            data={"name": "홍길동", "phone": "12", "kind": "desk", "role_slot": "", "role_label": ""},
+        )
+        assert response.status_code == 400
+        assert "전화번호 형식" in response.text
+
+    def test_purge_removes_from_the_matrix(self, loaded):
+        page = loaded.get("/")
+        outlet_id = re.search(r'data-outlet="(\d+)"', page.text).group(1)
+        modal = loaded.get(f"/outlet/{outlet_id}")
+        assignment_id = re.search(r"/assignment/(\d+)/edit", modal.text).group(1)
+        name = re.search(r'<a href="/person/\d+">([^<]+)</a>', modal.text).group(1)
+
+        loaded.post(f"/assignment/{assignment_id}/delete", data={"mode": "purge"})
+        after = loaded.get(f"/outlet/{outlet_id}").text
+        assert f">{name}</a>" not in after
+
+    def test_add_new_row(self, loaded):
+        page = loaded.get("/")
+        outlet_id = re.search(r'data-outlet="(\d+)"', page.text).group(1)
+        response = loaded.post(
+            f"/outlet/{outlet_id}/add",
+            data={
+                "name": "새로운기자",
+                "phone": "010-2222-3333",
+                "kind": "reporter",
+                "role_slot": "",
+                "role_label": "기자",
+                "dept": "산업부",
+                "note": "",
+            },
+        )
+        assert response.headers.get("X-Contacts-Edited")
+        assert "새로운기자" in loaded.get(f"/outlet/{outlet_id}").text
+
+    def test_edit_is_recorded_in_the_audit_log(self, loaded):
+        assignment_id = self._first_assignment_id(loaded)
+        loaded.post(
+            f"/assignment/{assignment_id}/edit",
+            data={"name": "감사로그", "phone": "", "kind": "desk", "role_slot": "", "role_label": ""},
+        )
+        assert "edit_assignment" in loaded.get("/admin/users").text
+
+
+class TestEditPermissions:
+    @pytest.fixture()
+    def viewer(self, client, db_session):
+        from app.models import AppUser
+        from app.services.auth import hash_password
+
+        db_session.add(
+            AppUser(
+                username="viewer2",
+                display_name="조회자",
+                password_hash=hash_password("verysecret123"),
+                role="viewer",
+            )
+        )
+        db_session.commit()
+        client.post(
+            "/login", data={"username": "viewer2", "password": "verysecret123", "next": "/"}
+        )
+        return client
+
+    def test_viewer_cannot_open_edit_form(self, viewer):
+        assert viewer.get("/assignment/1/edit").status_code == 403
+
+    def test_viewer_cannot_delete(self, viewer):
+        assert viewer.post("/assignment/1/delete", data={"mode": "purge"}).status_code == 403
+
+    def test_viewer_sees_no_edit_buttons(self, viewer, db_session):
+        from app.models import Outlet
+        from sqlalchemy import select
+
+        outlet = db_session.scalar(select(Outlet))
+        modal = viewer.get(f"/outlet/{outlet.id}")
+        assert "/edit" not in modal.text

@@ -26,6 +26,7 @@ CATEGORY_ORDER = ["종합지", "경제지", "방송", "통신사", "전문지", 
 
 @dataclass
 class Entry:
+    assignment_id: int
     person_id: int
     name: str
     phone: str | None
@@ -37,6 +38,7 @@ class Entry:
     concurrent: bool
     since: date
     is_recent: bool
+    locked: bool = False
 
     @property
     def role_text(self) -> str:
@@ -128,6 +130,7 @@ def _entry(assignment: Assignment, cutoff: date, seed_files: frozenset[int] = fr
     # 초기 적재분은 '전부 신규'이므로 변동 음영을 넣지 않는다.
     recent = assignment.valid_from >= cutoff and assignment.source_file_id not in seed_files
     return Entry(
+        assignment_id=assignment.id,
         person_id=assignment.person_id,
         name=assignment.person.name,
         phone=assignment.person.phone,
@@ -139,6 +142,7 @@ def _entry(assignment: Assignment, cutoff: date, seed_files: frozenset[int] = fr
         concurrent=assignment.concurrent,
         since=assignment.valid_from,
         is_recent=recent,
+        locked=assignment.locked,
     )
 
 

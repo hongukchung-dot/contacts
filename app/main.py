@@ -20,8 +20,10 @@ from sqlalchemy.orm import Session
 from .config import BASE_DIR, get_settings
 from .db import get_db
 from .ingest.normalize import format_phone
+from .ingest.reference import get_reference
 from .models import (
     APPLIED,
+    Assignment,
     APPROVED,
     CONFLICT,
     NEW,
@@ -34,6 +36,7 @@ from .models import (
     Change,
     ChangeSet,
     Outlet,
+    Person,
 )
 from .services import directory, search as search_service
 from .services.auth import (
@@ -45,6 +48,16 @@ from .services.auth import (
     log_action,
     read_session,
     verify_password,
+)
+from .services.edit import (
+    EditError,
+    close_assignment,
+    create_assignment,
+    merge_candidates,
+    merge_persons,
+    parse_form,
+    purge_assignment,
+    update_assignment,
 )
 from .services.ingest import DuplicateFileError, apply_change_set, reject_all_pending, stage_file
 
@@ -92,6 +105,7 @@ CHANGE_TYPE_LABEL = {
     CONFLICT: "확인필요",
 }
 templates.env.globals["CHANGE_TYPE_LABEL"] = CHANGE_TYPE_LABEL
+templates.env.globals["SLOT_CODES"] = lambda: get_reference().slot_codes
 
 
 # ── 인증 ────────────────────────────────────────────────────────────────────
@@ -281,7 +295,16 @@ async def person_page(
     detail = directory.person_detail(db, person_id)
     if detail is None:
         raise HTTPException(status_code=404, detail="인물을 찾을 수 없습니다.")
-    return templates.TemplateResponse(request, "person.html", {"user": user, **detail})
+    return templates.TemplateResponse(
+        request,
+        "person.html",
+        {
+            "user": user,
+            **detail,
+            "candidates": merge_candidates(db, detail["person"]) if user.can_edit else [],
+            "merged": request.query_params.get("merged"),
+        },
+    )
 
 
 @app.get("/history", response_class=HTMLResponse)
@@ -514,6 +537,176 @@ async def export_xlsx(
         buffer.getvalue(),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f'attachment; filename="contacts_{stamp}.xlsx"'},
+    )
+
+
+# ── 직접 수정 / 삭제 / 합치기 ───────────────────────────────────────────────
+
+@app.get("/assignment/{assignment_id}/edit", response_class=HTMLResponse)
+async def assignment_edit_form(
+    request: Request,
+    assignment_id: int,
+    user: AppUser = Depends(require_editor),
+    db: Session = Depends(get_db),
+) -> Response:
+    assignment = db.get(Assignment, assignment_id)
+    if assignment is None:
+        raise HTTPException(status_code=404, detail="항목을 찾을 수 없습니다.")
+    return templates.TemplateResponse(
+        request,
+        "_edit_form.html",
+        {
+            "user": user,
+            "assignment": assignment,
+            "outlet": assignment.outlet,
+            "person": assignment.person,
+            "slots": get_reference().slot_codes,
+            "error": None,
+        },
+    )
+
+
+@app.post("/assignment/{assignment_id}/edit", response_class=HTMLResponse)
+async def assignment_edit(
+    request: Request,
+    assignment_id: int,
+    user: AppUser = Depends(require_editor),
+    db: Session = Depends(get_db),
+) -> Response:
+    assignment = db.get(Assignment, assignment_id)
+    if assignment is None:
+        raise HTTPException(status_code=404, detail="항목을 찾을 수 없습니다.")
+    form = await request.form()
+    try:
+        changes = update_assignment(db, assignment, parse_form(form), user=user)
+    except EditError as exc:
+        return templates.TemplateResponse(
+            request,
+            "_edit_form.html",
+            {
+                "user": user,
+                "assignment": assignment,
+                "outlet": assignment.outlet,
+                "person": assignment.person,
+                "slots": get_reference().slot_codes,
+                "error": str(exc),
+            },
+            status_code=400,
+        )
+    log_action(
+        db, user, "edit_assignment",
+        f"{assignment.outlet.name} {assignment.person.name}: " + "; ".join(changes),
+        request.client.host if request.client else None,
+    )
+    db.commit()
+    return _edited(assignment.outlet_id)
+
+
+@app.post("/assignment/{assignment_id}/delete", response_class=HTMLResponse)
+async def assignment_delete(
+    request: Request,
+    assignment_id: int,
+    mode: str = Form("purge"),
+    user: AppUser = Depends(require_editor),
+    db: Session = Depends(get_db),
+) -> Response:
+    assignment = db.get(Assignment, assignment_id)
+    if assignment is None:
+        raise HTTPException(status_code=404, detail="항목을 찾을 수 없습니다.")
+    outlet_id = assignment.outlet_id
+    label = f"{assignment.outlet.name} {assignment.person.name} ({assignment.role_label or '-'})"
+
+    if mode == "close":
+        close_assignment(assignment, user=user)
+        log_action(db, user, "close_assignment", label, None)
+    else:
+        purge_assignment(db, assignment)
+        log_action(db, user, "purge_assignment", label, None)
+    db.commit()
+    return _edited(outlet_id)
+
+
+@app.get("/outlet/{outlet_id}/add", response_class=HTMLResponse)
+async def assignment_add_form(
+    request: Request,
+    outlet_id: int,
+    user: AppUser = Depends(require_editor),
+    db: Session = Depends(get_db),
+) -> Response:
+    outlet = db.get(Outlet, outlet_id)
+    if outlet is None:
+        raise HTTPException(status_code=404, detail="매체를 찾을 수 없습니다.")
+    return templates.TemplateResponse(
+        request,
+        "_edit_form.html",
+        {
+            "user": user,
+            "assignment": None,
+            "outlet": outlet,
+            "person": None,
+            "slots": get_reference().slot_codes,
+            "error": None,
+        },
+    )
+
+
+@app.post("/outlet/{outlet_id}/add", response_class=HTMLResponse)
+async def assignment_add(
+    request: Request,
+    outlet_id: int,
+    user: AppUser = Depends(require_editor),
+    db: Session = Depends(get_db),
+) -> Response:
+    outlet = db.get(Outlet, outlet_id)
+    if outlet is None:
+        raise HTTPException(status_code=404, detail="매체를 찾을 수 없습니다.")
+    form = await request.form()
+    try:
+        assignment = create_assignment(db, outlet, parse_form(form), user=user)
+    except EditError as exc:
+        return templates.TemplateResponse(
+            request,
+            "_edit_form.html",
+            {
+                "user": user,
+                "assignment": None,
+                "outlet": outlet,
+                "person": None,
+                "slots": get_reference().slot_codes,
+                "error": str(exc),
+            },
+            status_code=400,
+        )
+    log_action(db, user, "add_assignment", f"{outlet.name} {assignment.person.name}", None)
+    db.commit()
+    return _edited(outlet_id)
+
+
+@app.post("/person/{person_id}/merge")
+async def person_merge(
+    request: Request,
+    person_id: int,
+    target_id: int = Form(...),
+    user: AppUser = Depends(require_editor),
+    db: Session = Depends(get_db),
+) -> Response:
+    keep = db.get(Person, person_id)
+    drop = db.get(Person, target_id)
+    if keep is None or drop is None:
+        raise HTTPException(status_code=404, detail="인물을 찾을 수 없습니다.")
+    try:
+        moved = merge_persons(db, keep, drop, user=user)
+    except EditError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    log_action(db, user, "merge_persons", f"{drop.name} → {keep.name} ({moved}건)", None)
+    db.commit()
+    return RedirectResponse(f"/person/{keep.id}?merged={moved}", status_code=303)
+
+
+def _edited(outlet_id: int) -> Response:
+    """편집 후 모달을 닫고 화면을 새로 고치도록 지시하는 조각."""
+    return HTMLResponse(
+        f'<div data-edited="{outlet_id}"></div>', headers={"X-Contacts-Edited": str(outlet_id)}
     )
 
 

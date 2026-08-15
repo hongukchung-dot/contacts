@@ -5,6 +5,9 @@
     <span class="tag">{{ outlet.category }}</span>
     <span class="muted">데스크 {{ desks|length }}명 · 출입기자 {{ reporter_total }}명</span>
     <span class="spacer" style="flex:1"></span>
+    {% if user.can_edit %}
+      <button class="btn small" data-modal="/outlet/{{ outlet.id }}/add">+ 항목 추가</button>
+    {% endif %}
     <button class="btn small" data-copy-list="outlet-list-{{ outlet.id }}">명단 전체 복사</button>
     <button class="close" data-close aria-label="닫기">&times;</button>
   </div>
@@ -13,14 +16,17 @@
     <div class="deptblock">
       <h4>데스크</h4>
       <div class="tablewrap"><table>
-        <thead><tr><th style="width:90px;">이름</th><th>직책</th><th style="width:70px;">부서</th><th style="width:130px;">연락처</th></tr></thead>
+        <thead><tr><th style="width:90px;">이름</th><th>직책</th><th style="width:70px;">부서</th><th style="width:130px;">연락처</th>{% if user.can_edit %}<th style="width:52px;"></th>{% endif %}</tr></thead>
         <tbody>
         {% for entry in desks %}
           <tr data-row="{{ entry.name }}	{{ entry.role_text or '' }}	{{ entry.phone_display }}">
             <td class="{{ 'person recent' if entry.is_recent }}"><a href="/person/{{ entry.person_id }}">{{ entry.name }}</a></td>
-            <td>{{ entry.role_text or '-' }}{% if entry.concurrent %} <span class="tag">겸직</span>{% endif %}</td>
+            <td>{{ entry.role_text or '-' }}{% if entry.concurrent %} <span class="tag">겸직</span>{% endif %}{% if entry.locked %} <span class="lockmark" title="손으로 고친 항목">✎</span>{% endif %}</td>
             <td>{{ entry.dept or '-' }}</td>
             <td>{{ phone(entry, mask) }}</td>
+            {% if user.can_edit %}
+              <td><button class="rowedit" data-modal="/assignment/{{ entry.assignment_id }}/edit">수정</button></td>
+            {% endif %}
           </tr>
         {% endfor %}
         </tbody>
@@ -33,14 +39,17 @@
       <div class="deptblock">
         <h4>{{ dept }} 출입기자 ({{ entries|length }}명)</h4>
         <div class="tablewrap"><table>
-          <thead><tr><th style="width:90px;">이름</th><th>직급</th><th style="width:90px;">담당</th><th style="width:130px;">연락처</th></tr></thead>
+          <thead><tr><th style="width:90px;">이름</th><th>직급</th><th style="width:90px;">담당</th><th style="width:130px;">연락처</th>{% if user.can_edit %}<th style="width:52px;"></th>{% endif %}</tr></thead>
           <tbody>
           {% for entry in entries %}
             <tr data-row="{{ entry.name }}	{{ entry.role_text or entry.rank }}	{{ entry.phone_display }}">
               <td class="{{ 'person recent' if entry.is_recent }}"><a href="/person/{{ entry.person_id }}">{{ entry.name }}</a></td>
-              <td>{{ entry.role_text or entry.rank }}</td>
+              <td>{{ entry.role_text or entry.rank }}{% if entry.locked %} <span class="lockmark" title="손으로 고친 항목">✎</span>{% endif %}</td>
               <td>{{ entry.note or '-' }}</td>
               <td>{{ phone(entry, mask) }}</td>
+              {% if user.can_edit %}
+                <td><button class="rowedit" data-modal="/assignment/{{ entry.assignment_id }}/edit">수정</button></td>
+              {% endif %}
             </tr>
           {% endfor %}
           </tbody>

@@ -127,6 +127,7 @@ main { padding: 16px; max-width: 1680px; margin: 0 auto; }
 .btn.primary:hover { color: #fff; opacity: 0.9; }
 .btn.danger { color: var(--danger); border-color: var(--danger); }
 .btn.small { padding: 4px 9px; font-size: 12px; }
+.btn { white-space: nowrap; }
 
 .chips { display: flex; gap: 6px; flex-wrap: wrap; }
 .chip {
@@ -288,3 +289,47 @@ tr.category-head th {
   body { background: #fff; }
   .panel { border: none; }
 }
+
+
+/* ── 편집 폼 ──────────────────────────────────────────── */
+.formgrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 12px 14px;
+}
+.formgrid label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
+.formgrid label > span { color: var(--ink-soft); }
+.formgrid label small { font-weight: 400; }
+.formgrid input[type="text"],
+.formgrid input:not([type]),
+.formgrid select {
+  padding: 7px 9px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+}
+.formgrid input:focus, .formgrid select:focus {
+  outline: 2px solid var(--accent-soft);
+  border-color: var(--accent);
+}
+.formgrid label.checkline { flex-direction: row; align-items: center; gap: 6px; }
+.formactions { display: flex; gap: 8px; margin-top: 16px; }
+
+/* 행 끝의 수정 버튼 */
+.rowedit {
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  color: var(--ink-faint);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 2px 7px;
+  white-space: nowrap;
+}
+.rowedit:hover { color: var(--accent); border-color: var(--line); }
+tr:hover .rowedit { color: var(--ink-soft); }
+
+.lockmark { color: var(--warn); font-size: 11px; }

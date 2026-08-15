@@ -2,6 +2,10 @@
 {% block title %}{{ person.name }} · 언론사 주소록{% endblock %}
 {% block content %}
 
+{% if merged %}
+  <div class="notice ok">두 인물을 합쳤습니다. 자리 {{ merged }}건이 이쪽으로 옮겨졌습니다.</div>
+{% endif %}
+
 <div class="panel">
   <h2>{{ person.name }}</h2>
   <div class="body">
@@ -11,21 +15,57 @@
 
     <h4>현재 자리</h4>
     <div class="tablewrap"><table>
-      <thead><tr><th style="width:120px;">매체</th><th style="width:70px;">구분</th><th>직책</th><th style="width:80px;">부서</th><th style="width:100px;">시작</th></tr></thead>
+      <thead><tr><th style="width:120px;">매체</th><th style="width:70px;">구분</th><th>직책</th><th style="width:80px;">부서</th><th style="width:100px;">시작</th>{% if user.can_edit %}<th style="width:52px;"></th>{% endif %}</tr></thead>
       <tbody>
       {% for a in current %}
         <tr>
           <td>{{ a.outlet.name }}</td>
           <td>{{ '데스크' if a.kind == 'desk' else '출입기자' }}</td>
-          <td>{{ a.role_label or a.role_slot or '-' }}</td>
+          <td>{{ a.role_label or a.role_slot or '-' }}{% if a.locked %} <span class="lockmark" title="손으로 고친 항목">✎</span>{% endif %}</td>
           <td>{{ a.dept or '-' }}</td>
           <td class="muted">{{ a.valid_from }}</td>
+          {% if user.can_edit %}
+            <td><button class="rowedit" data-modal="/assignment/{{ a.id }}/edit">수정</button></td>
+          {% endif %}
         </tr>
       {% else %}
-        <tr><td colspan="5" class="muted">현재 등록된 자리가 없습니다.</td></tr>
+        <tr><td colspan="6" class="muted">현재 등록된 자리가 없습니다.</td></tr>
       {% endfor %}
       </tbody>
     </table></div>
+
+    {% if user.can_edit and candidates %}
+    <h4 style="margin-top:18px;">같은 사람으로 의심되는 항목</h4>
+    <p class="muted" style="margin-top:0;">
+      이름이나 번호가 같은 인물입니다. 합치면 상대의 자리·번호 이력이 <b>{{ person.name }}</b> 쪽으로 모이고
+      겹치는 자리는 하나만 남습니다. 되돌릴 수 없으니 확인 후 진행하세요.
+    </p>
+    <div class="tablewrap"><table>
+      <thead><tr><th style="width:100px;">이름</th><th style="width:140px;">번호</th><th>현재 자리</th><th style="width:120px;"></th></tr></thead>
+      <tbody>
+      {% for other in candidates %}
+        <tr>
+          <td><a href="/person/{{ other.id }}">{{ other.name }}</a></td>
+          <td class="muted">{{ format_phone(other.phone) or '—' }}</td>
+          <td class="muted">
+            {% for a in other.assignments if a.valid_to is none %}
+              {{ a.outlet.name }} {{ a.role_label or a.role_slot or '' }}{% if not loop.last %} · {% endif %}
+            {% else %}—{% endfor %}
+          </td>
+          <td>
+            <form method="post" action="/person/{{ person.id }}/merge">
+              <input type="hidden" name="target_id" value="{{ other.id }}">
+              <button class="btn small" type="submit"
+                      onclick="return confirm('{{ other.name }} 을(를) {{ person.name }} 쪽으로 합칠까요?\n되돌릴 수 없습니다.')">
+                이쪽으로 합치기
+              </button>
+            </form>
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table></div>
+    {% endif %}
 
     {% if past %}
     <h4 style="margin-top:18px;">지난 이력</h4>

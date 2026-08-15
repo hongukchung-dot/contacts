@@ -1,0 +1,100 @@
+{% set is_new = assignment is none %}
+<div class="modal">
+  <div class="head">
+    <h3>{{ outlet.name }} — {{ '항목 추가' if is_new else '항목 수정' }}</h3>
+    <span class="spacer" style="flex:1"></span>
+    <button class="close" data-close aria-label="닫기">&times;</button>
+  </div>
+  <div class="body">
+    {% if error %}<div class="notice error">{{ error }}</div>{% endif %}
+
+    <form method="post"
+          action="{{ '/outlet/' ~ outlet.id ~ '/add' if is_new else '/assignment/' ~ assignment.id ~ '/edit' }}"
+          data-edit-form>
+      <div class="formgrid">
+        <label>
+          <span>이름</span>
+          <input name="name" required maxlength="20" value="{{ person.name if person else '' }}" autofocus>
+        </label>
+        <label>
+          <span>전화번호</span>
+          <input name="phone" placeholder="010-1234-5678"
+                 value="{{ format_phone(person.phone) if person and person.phone else '' }}">
+        </label>
+        <label>
+          <span>구분</span>
+          <select name="kind">
+            <option value="desk" {{ 'selected' if not is_new and assignment.kind == 'desk' }}>데스크</option>
+            <option value="reporter" {{ 'selected' if is_new or assignment.kind == 'reporter' }}>출입기자</option>
+          </select>
+        </label>
+        <label>
+          <span>직책 열 <small class="muted">(간부 현황 표에서 어느 칸에 놓일지)</small></span>
+          <select name="role_slot">
+            <option value="">— 표에 넣지 않음 (출입기자) —</option>
+            {% for code in slots %}
+              <option value="{{ code }}" {{ 'selected' if not is_new and assignment.role_slot == code }}>{{ code }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>
+          <span>직책 <small class="muted">(원문 그대로. 예: 산업1부장, 차장)</small></span>
+          <input name="role_label" maxlength="120" value="{{ assignment.role_label or '' if not is_new else '' }}">
+        </label>
+        <label>
+          <span>부서</span>
+          <input name="dept" maxlength="40" list="dept-options"
+                 value="{{ assignment.dept or '' if not is_new else '' }}">
+          <datalist id="dept-options">
+            <option value="산업부"><option value="테크부"><option value="IT과학부">
+            <option value="경제부"><option value="사회부">
+          </datalist>
+        </label>
+        <label>
+          <span>담당 <small class="muted">(재계, 전자 등)</small></span>
+          <input name="note" maxlength="120" value="{{ assignment.note or '' if not is_new else '' }}">
+        </label>
+        <label class="checkline">
+          <input type="checkbox" name="concurrent" value="1"
+                 {{ 'checked' if not is_new and assignment.concurrent }}>
+          <span>겸직</span>
+        </label>
+      </div>
+
+      <div class="formactions">
+        <button class="btn primary" type="submit">{{ '추가' if is_new else '저장' }}</button>
+        <button class="btn" type="button" data-close>취소</button>
+      </div>
+    </form>
+
+    {% if not is_new %}
+      <hr style="border:none;border-top:1px solid var(--line);margin:18px 0 14px;">
+      <p class="muted" style="margin-top:0;">이 항목을 목록에서 빼려면 상황에 맞는 쪽을 고르세요.</p>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;">
+        <form method="post" action="/assignment/{{ assignment.id }}/delete" data-edit-form>
+          <input type="hidden" name="mode" value="close">
+          <button class="btn" type="submit"
+                  onclick="return confirm('인사이동으로 이 자리를 떠난 것으로 처리할까요?\n지난 이력에는 남습니다.')">
+            자리 종료 <small class="muted">(이력 보존)</small>
+          </button>
+        </form>
+        <form method="post" action="/assignment/{{ assignment.id }}/delete" data-edit-form>
+          <input type="hidden" name="mode" value="purge">
+          <button class="btn danger" type="submit"
+                  onclick="return confirm('잘못 들어온 항목으로 보고 완전히 지울까요?\n되돌릴 수 없습니다.')">
+            잘못된 항목 삭제 <small>(완전 삭제)</small>
+          </button>
+        </form>
+      </div>
+      <p class="muted" style="margin-bottom:0;">
+        중복 인물이라면 <a href="/person/{{ assignment.person_id }}">인물 페이지</a>에서 합치는 편이 낫습니다.
+        자리와 번호 이력이 한쪽으로 모입니다.
+      </p>
+    {% endif %}
+
+    <p class="muted" style="margin-bottom:0;">
+      여기서 고친 항목은 잠깁니다. 다음에 올라온 파일이 같은 자리를 바꾸려 하면
+      자동 반영되지 않고 검토 화면으로 넘어갑니다.
+    </p>
+  </div>
+</div>

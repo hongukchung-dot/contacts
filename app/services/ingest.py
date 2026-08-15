@@ -228,6 +228,13 @@ def _build_changes(
         payload["person_id"] = person_id
         seen_person_outlet.add((person_id, outlet.id))
         person = current["persons"][person_id]
+        # 화면에서 손으로 고친 자리가 있는 사람은 자동 반영하지 않는다.
+        # 안 그러면 애써 바로잡은 값이 다음 업로드에 조용히 원복된다.
+        locked = any(
+            a.locked for a in current["assignments_by_person"].get(person_id, [])
+            if a.outlet_id == outlet.id
+        )
+        lock_note = " (손으로 고친 항목이라 확인이 필요합니다)" if locked else ""
 
         # (1) 번호 변경
         if record.phone and person.phone and record.phone != person.phone:
@@ -240,8 +247,8 @@ def _build_changes(
                 field="phone",
                 old_value=format_phone(person.phone),
                 new_value=format_phone(record.phone),
-                reason=reason or f"{source_file.as_of} 파일 기준 번호 변경",
-                auto_apply=(not suspect) and (not stale),
+                reason=(reason or f"{source_file.as_of} 파일 기준 번호 변경") + lock_note,
+                auto_apply=(not suspect) and (not stale) and (not locked),
                 person_id=person_id,
                 outlet_id=outlet.id,
                 payload=payload,
@@ -255,8 +262,8 @@ def _build_changes(
                 field="phone",
                 old_value=None,
                 new_value=format_phone(record.phone),
-                reason="비어 있던 번호가 채워짐",
-                auto_apply=not stale,
+                reason="비어 있던 번호가 채워짐" + lock_note,
+                auto_apply=(not stale) and (not locked),
                 person_id=person_id,
                 outlet_id=outlet.id,
                 payload=payload,
@@ -280,8 +287,8 @@ def _build_changes(
                 field="assignment",
                 old_value=_describe_assignment(other[0]) if other else None,
                 new_value=_describe(record),
-                reason=reason,
-                auto_apply=not stale,
+                reason=reason + lock_note,
+                auto_apply=(not stale) and (not locked),
                 person_id=person_id,
                 outlet_id=outlet.id,
                 payload=payload,
@@ -297,8 +304,9 @@ def _build_changes(
                     field="role",
                     old_value=assignment.role_label,
                     new_value=record.role_label,
-                    reason="직책 표기 변경",
-                    auto_apply=not stale,
+                    reason="직책 표기 변경"
+                    + (" (손으로 고친 항목이라 확인이 필요합니다)" if assignment.locked else ""),
+                    auto_apply=(not stale) and (not assignment.locked),
                     person_id=person_id,
                     outlet_id=outlet.id,
                     payload={**payload, "assignment_id": assignment.id},

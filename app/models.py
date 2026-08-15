@@ -151,6 +151,13 @@ class Assignment(Base, TimestampMixin):
         ForeignKey("source_file.id", ondelete="SET NULL"), nullable=True
     )
 
+    # 사람이 화면에서 직접 고친 자리. 다음 파일이 조용히 되돌리지 못하게 막는다.
+    locked: Mapped[bool] = mapped_column(Boolean, default=False)
+    edited_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    edited_by_id: Mapped[int | None] = mapped_column(
+        ForeignKey("app_user.id", ondelete="SET NULL"), nullable=True
+    )
+
     person: Mapped[Person] = relationship(back_populates="assignments")
     outlet: Mapped[Outlet] = relationship(back_populates="assignments")
 
