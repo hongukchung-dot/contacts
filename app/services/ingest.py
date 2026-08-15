@@ -300,6 +300,7 @@ def _build_changes(
         matched_assignment_ids,
         seen_person_outlet,
         as_of,
+        source_file.file_kind,
     )
 
     if stale:
@@ -376,9 +377,14 @@ def _load_current(session: Session) -> dict:
             by_outlet_name.setdefault((assignment.outlet_id, person.name_key), person.id)
         assignments_by_person.setdefault(assignment.person_id, []).append(assignment)
 
+    file_kind_by_id = dict(
+        session.execute(select(SourceFile.id, SourceFile.file_kind)).all()
+    )
+
     return {
         "persons": persons,
         "assignments": assignments,
+        "file_kind_by_id": file_kind_by_id,
         "assignments_by_person": assignments_by_person,
         "by_phone": by_phone,
         "by_name": by_name,
@@ -406,6 +412,7 @@ def _detect_removals(
     matched_assignment_ids: set[int],
     seen_person_outlet: set[tuple[int, int]],
     as_of: date,
+    file_kind: str,
 ) -> None:
     """파일에서 사라진 사람을 찾는다.
 
@@ -416,11 +423,18 @@ def _detect_removals(
     2. **그 매체에 이름이 보인 사람은 삭제로 보지 않는다.** 출입기자였다가 데스크로
        올라가거나 부서가 바뀐 것뿐인데 삭제로 잡히면 안 되기 때문이다.
        그런 이동은 이미 '변경'으로 따로 기록된다.
+    3. **같은 종류의 파일이 넣은 값만 지울 수 있다.** 출입기자 xlsx 와 통합 docx 는
+       둘 다 출입기자를 담지만 수록 범위가 다르다(docx는 산업·테크 중심).
+       서로가 서로의 인원을 지우게 두면 업로드할 때마다 가짜 삭제가 쏟아진다.
+       각 파일은 자기가 넣은 명단만 관리한다.
     """
     for assignment in current["assignments"]:
         if assignment.id in matched_assignment_ids:
             continue
         if (assignment.person_id, assignment.outlet_id) in seen_person_outlet:
+            continue
+        origin = current["file_kind_by_id"].get(assignment.source_file_id)
+        if origin is not None and origin != file_kind:
             continue
         in_scope = False
         if assignment.kind == "desk":
@@ -478,7 +492,8 @@ def _describe(record: ContactRecord) -> str:
 
 
 def _describe_assignment(assignment: Assignment) -> str:
-    bits = [assignment.role_label or assignment.role_slot or assignment.kind]
+    default = "출입기자" if assignment.kind == "reporter" else "데스크"
+    bits = [assignment.role_label or assignment.role_slot or default]
     if assignment.dept:
         bits.insert(0, assignment.dept)
     return " · ".join(bits)
@@ -551,10 +566,25 @@ def _get_or_create_person(session: Session, change: Change) -> Person:
         person = session.get(Person, person_id)
         if person:
             return person
+
+    # 한 파일 안에서 같은 사람이 여러 칸에 나오면(예: 증권부장 + 사회부장 겸임)
+    # 모두 '신규'로 잡히므로, 만들기 전에 이미 만들어졌는지 다시 확인한다.
+    name_key = normalize_key(change.person_name)
+    phone = payload.get("phone")
+    if phone:
+        existing = session.scalar(select(Person).where(Person.phone == phone))
+        if existing:
+            change.person_id = existing.id
+            return existing
+    existing = session.scalar(select(Person).where(Person.name_key == name_key))
+    if existing:
+        change.person_id = existing.id
+        return existing
+
     person = Person(
         name=change.person_name,
-        name_key=normalize_key(change.person_name),
-        phone=payload.get("phone"),
+        name_key=name_key,
+        phone=phone,
     )
     session.add(person)
     session.flush()
@@ -636,11 +666,18 @@ def _apply_assignment(session: Session, change: Change, as_of: date, source_file
         for occupant in occupants:
             occupant.valid_to = as_of
 
+    # 같은 자리(구분·직책·부서)를 다시 채우는 경우에만 이전 행을 닫는다.
+    # 한 사람이 두 자리를 겸하는 경우(예: 매일경제 강두순 — 증권부장 + 사회부장)가
+    # 실제로 있으므로, 매체·구분만 보고 닫으면 겸직이 사라진다.
+    slot = payload.get("role_slot")
+    dept = payload.get("dept")
     existing = session.scalar(
         select(Assignment).where(
             Assignment.person_id == person.id,
             Assignment.outlet_id == outlet_id,
             Assignment.kind == payload.get("kind", "reporter"),
+            Assignment.role_slot.is_(None) if slot is None else Assignment.role_slot == slot,
+            Assignment.dept.is_(None) if dept is None else Assignment.dept == dept,
             Assignment.valid_to.is_(None),
         )
     )

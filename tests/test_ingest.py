@@ -293,7 +293,7 @@ def _drop_row(tmp_path: Path, fixture: str, name: str) -> Path:
     for sheet in workbook.worksheets:
         for idx in range(sheet.max_row, 0, -1):
             values = [c.value for c in sheet[idx]]
-            if any(isinstance(v, str) and v.strip() == name for v in values):
+            if any(isinstance(v, str) and name in v for v in values):
                 sheet.delete_rows(idx)
     workbook.save(target)
     return target
@@ -333,9 +333,72 @@ class TestRemovalFalsePositives:
         assert "석민수" not in removed
         assert "박예원" not in removed
 
-    def test_genuinely_absent_person_is_still_flagged(self, seeded):
-        """반대로 정말 빠진 사람은 계속 잡아야 한다."""
+    def test_genuinely_absent_person_is_still_flagged(self, seeded, tmp_path):
+        """반대로 같은 종류의 새 파일에서 정말 빠진 사람은 계속 잡아야 한다."""
         apply(seeded, load(seeded, "sample_desk_matrix.xlsx"))
-        change_set = load(seeded, "sample_combined.docx")
+        trimmed = _drop_row(tmp_path, "sample_desk_matrix.xlsx", "신 수 정")
+        change_set = stage_file(
+            seeded, trimmed, filename="(26-0901) 주요 데스크 현황.xlsx",
+            as_of_override=date(2026, 9, 1),
+        )
+        seeded.flush()
         removed = {c.person_name for c in change_set.changes if c.change_type == REMOVE}
-        assert "신수정" in removed  # 동아일보 산업2부장 — docx 에 없음
+        assert "신수정" in removed
+
+
+class TestRemovalScopeByFileKind:
+    """수록 범위가 다른 파일끼리 서로의 인원을 지우면 안 된다."""
+
+    @pytest.fixture(autouse=True)
+    def _tmp(self, tmp_path):
+        self.tmp = tmp_path
+
+    def test_reporter_xlsx_does_not_remove_docx_people(self, db_session):
+        apply(db_session, load(db_session, "sample_reporter_list.xlsx"))
+        apply(db_session, load(db_session, "sample_combined.docx"))
+
+        # docx 로만 들어온 인물들 (출입기자 xlsx 에는 없다)
+        assert person_by_name(db_session, "김성민") is not None
+        assert person_by_name(db_session, "최인준") is not None
+
+        # 이제 출입기자 xlsx 계열의 새 파일을 올린다 (내용이 조금 달라야 중복이 아니다)
+        newer = _rewrite_phone(
+            self.tmp, "sample_reporter_list.xlsx", "010-2600-0039", "010-2600-9999"
+        )
+        change_set = stage_file(
+            db_session, newer, filename="(26-0901) 출입기자 현황.xlsx",
+            as_of_override=date(2026, 9, 1),
+        )
+        db_session.flush()
+        removed = {c.person_name for c in change_set.changes if c.change_type == REMOVE}
+        assert "김성민" not in removed
+        assert "최인준" not in removed
+
+
+class TestDuplicatePersonWithinFile:
+    def test_same_person_in_two_columns_creates_one_person(self, db_session):
+        """매일경제 강두순은 증권부장·사회부장② 두 칸에 함께 적혀 있다."""
+        apply(db_session, load(db_session, "sample_desk_matrix.xlsx"))
+
+        rows = db_session.scalars(select(Person).where(Person.name == "강두순")).all()
+        assert len(rows) == 1
+
+        assignments = db_session.scalars(
+            select(Assignment).where(
+                Assignment.person_id == rows[0].id, Assignment.valid_to.is_(None)
+            )
+        ).all()
+        assert {a.role_slot for a in assignments} == {"증권부장", "사회부장"}
+
+    def test_reupload_does_not_flag_them_as_removed(self, db_session, tmp_path):
+        apply(db_session, load(db_session, "sample_desk_matrix.xlsx"))
+        modified = _rewrite_phone(
+            tmp_path, "sample_desk_matrix.xlsx", "010-7344-0001", "010-7344-9999"
+        )
+        change_set = stage_file(
+            db_session, modified, filename="(26-0901) 주요 데스크 현황.xlsx",
+            as_of_override=date(2026, 9, 1),
+        )
+        db_session.flush()
+        removed = {c.person_name for c in change_set.changes if c.change_type == REMOVE}
+        assert removed == set(), removed
