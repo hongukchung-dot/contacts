@@ -186,21 +186,32 @@ MSG
   info "도메인을 쓰려면 .env 의 SITE_ADDRESS 를 고친 뒤 ./deploy.sh 를 다시 실행하세요."
 fi
 
+# 이 포트를 잡고 있는 것이 우리 컨테이너인가.
+# 재배포할 때는 우리 자신이 포트를 물고 있는 게 정상이므로 충돌로 보면 안 된다.
+# (compose 버전마다 ps 출력 형식이 달라, 컨테이너 라벨로 판별한다)
+ours_holds_port() {
+  local port="$1"
+  docker ps --filter "label=com.docker.compose.project=$(compose_project)" \
+    --format '{{.Ports}}' 2>/dev/null | grep -q ":${port}->"
+}
+
 # .env 가 이미 있는 경우에도 포트 충돌은 미리 잡아 준다.
 HTTP_PORT=$(get_env HTTP_PORT); HTTP_PORT=${HTTP_PORT:-80}
 HTTPS_PORT=$(get_env HTTPS_PORT); HTTPS_PORT=${HTTPS_PORT:-443}
 for spec in "HTTP_PORT:$HTTP_PORT" "HTTPS_PORT:$HTTPS_PORT"; do
   key=${spec%%:*}; value=${spec##*:}
-  # 이미 우리 컨테이너가 물고 있는 경우는 충돌이 아니다 (재배포).
-  if port_busy "$value" && ! docker compose ps --format '{{.Publishers}}' 2>/dev/null | grep -q ":${value}->"; then
+  if port_busy "$value" && ! ours_holds_port "$value"; then
     fail "$(printf '%s\n' \
       "${value} 포트를 이미 다른 프로세스가 쓰고 있습니다." \
       "" \
       "$(who_has_port "$value")" \
       "" \
-      ".env 의 ${key} 를 비어 있는 포트로 바꾼 뒤 다시 실행하세요. 예)" \
+      "이 앱 자신이 아니라면, .env 의 ${key} 를 비어 있는 포트로 바꾼 뒤 다시 실행하세요." \
       "    sed -i 's/^${key}=.*/${key}=$(first_free_port 8080)/' .env" \
-      "    ./deploy.sh")"
+      "    ./deploy.sh" \
+      "" \
+      "이 앱이 맞다면 컨테이너를 내렸다가 다시 올리면 됩니다." \
+      "    docker compose down && ./deploy.sh")"
   fi
 done
 
@@ -213,7 +224,17 @@ info "이미지 빌드 …"
 docker compose build
 
 info "컨테이너 기동 …"
-docker compose up -d
+docker compose up -d --remove-orphans
+
+# 코드를 고쳤는데 이전 컨테이너가 그대로 살아 있으면 화면이 안 바뀐다.
+# 이미지가 바뀌었는데 컨테이너가 옛 이미지를 쓰고 있으면 강제로 다시 만든다.
+running_image=$(docker inspect --format '{{.Image}}' \
+  "$(docker compose ps -q app 2>/dev/null)" 2>/dev/null || true)
+built_image=$(docker image inspect --format '{{.Id}}' "$(compose_project)-app" 2>/dev/null || true)
+if [ -n "$running_image" ] && [ -n "$built_image" ] && [ "$running_image" != "$built_image" ]; then
+  info "새 이미지로 앱 컨테이너를 다시 만듭니다 …"
+  docker compose up -d --force-recreate app caddy
+fi
 
 info "DB 준비 대기 …"
 ready=0
