@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- 밥그릇 + 김 모양 단순 아이콘 -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M24,58h60c0,14 -10,24 -30,24s-30,-10 -30,-24z" />
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="4"
+        android:strokeLineCap="round"
+        android:pathData="M44,48c0,-6 4,-6 4,-12M58,48c0,-6 4,-6 4,-12" />
+</vector>
