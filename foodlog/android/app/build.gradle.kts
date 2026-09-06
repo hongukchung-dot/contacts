@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -61,11 +63,10 @@ fun prop(name: String): String {
     val fromEnv = System.getenv(name)
     if (fromEnv != null) return fromEnv
     val f = rootProject.file("local.properties")
-    if (f.exists()) {
-        val p = java.util.Properties().apply { f.inputStream().use { load(it) } }
-        p.getProperty(name)?.let { return it }
-    }
-    return ""
+    if (!f.exists()) return ""
+    val p = Properties()
+    f.inputStream().use { stream -> p.load(stream) }
+    return p.getProperty(name) ?: ""
 }
 
 dependencies {
